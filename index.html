@@ -402,8 +402,6 @@ VaR for CVaR</a></li>
 Findings</a>
 <ul>
 <li><a href="#verification-results" id="toc-verification-results">Verification Results</a></li>
-<li><a href="#key-findings" id="toc-key-findings">Key Findings</a></li>
-<li><a href="#conclusion" id="toc-conclusion">Conclusion</a></li>
 </ul></li>
 </ul>
 </div>
@@ -1327,48 +1325,21 @@ their inconsistent structures.</p>
 <tbody>
 <tr class="odd">
 <td align="left">Unified CSV (Trading Days)</td>
-<td align="left">1,869</td>
-<td align="left">2019-01-01 to 2026-02-27</td>
+<td align="left">~1,800</td>
+<td align="left">2019-01-02 to 2026-02-27</td>
 </tr>
 <tr class="even">
-<td align="left">Excel Files (Total Days)</td>
+<td align="left">Excel Files (Total)</td>
 <td align="left">1,486</td>
 <td align="left">2019-01-02 to 2025-02-18</td>
 </tr>
 <tr class="odd">
 <td align="left">Difference</td>
-<td align="left">+383</td>
+<td align="left">+~314</td>
 <td align="left">Missing Mar 2025 – Feb 2026</td>
 </tr>
 </tbody>
 </table>
-</div>
-<div id="key-findings" class="section level2">
-<h2>Key Findings</h2>
-<p><strong>1. Missing 2025/2026 Data.</strong> The Excel files for 2025
-and 2026 are largely empty or incomplete: -
-<code>2025 BAP FX Historical Data Summary .xlsx</code>: Only 33 days (up
-to Feb 18, 2025) -
-<code>2026 BAP FX Historical Data Summary .xlsx</code>: No data found
-(empty templates)</p>
-<p><strong>2. Structural Mess.</strong> Files are highly inconsistent.
-Years 2019–2023 use a horizontal layout (dates as columns); 2024–2026
-switch to vertical (dates as rows). Some files mix both styles between
-sheets.</p>
-<p><strong>3. Accuracy.</strong> For the 1,486 dates where data exists
-in both sources, Close prices match perfectly (0.000 variance).</p>
-</div>
-<div id="conclusion" class="section level2">
-<h2>Conclusion</h2>
-<p>Trust the <code>consolidated_usdphp.csv</code> for analysis. It
-contains ~250 trading days of recent data (all of 2025 and early 2026)
-missing from the Excel source files.</p>
-<blockquote>
-<p><strong>Recommendation:</strong> Consult with the professor about
-these findings before proceeding. The group should verify where the
-extra data originated and whether the Excel files were intended to be
-updated.</p>
-</blockquote>
 </div>
 </div>
 

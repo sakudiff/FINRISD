@@ -24,7 +24,6 @@ ENV/
 
 # R Markdown output
 *.html
-*.pdf
 
 # IDE
 .vscode/

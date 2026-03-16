@@ -1,8 +1,10 @@
 ---
 title: "USD/PHP FX Risk Analysis | Items 1-6"
 output: 
-  pdf_document:
+  html_document:
     df_print: kable
+    toc: true
+    theme: flatly
 ---
 
 ```{r setup, include=FALSE}
@@ -51,12 +53,17 @@ levene_test_manual <- function(group1, group2) {
 # Section 1: Data Load and Integrity Check
 
 ```{r data_load}
-df_raw <- read_csv("data/consolidated_usdphp.csv") %>%
+df_raw <- read_csv("data/unified_usdphp_bap.csv") %>%
   mutate(Date = as.Date(Date)) %>%
+  # Filter for trading days only (Monday=2, ..., Friday=6)
+  # This removes the weekends imputed by the consolidation script
+  filter(wday(Date) %in% 2:6) %>%
+  # Fix specific outlier on 2021-05-20: 478.855 -> 47.855
+  mutate(Open = ifelse(Date == as.Date("2021-05-20") & Open == 478.855, 47.855, Open)) %>%
   arrange(Date)
 
 integrity_check <- data.frame(
-  Metric = c("Total Row Count", "Start Date", "End Date", "Rows with High < Low"),
+  Metric = c("Total Trading Row Count", "Start Date", "End Date", "Rows with High < Low"),
   Value = c(
     as.character(nrow(df_raw)),
     as.character(min(df_raw$Date)),
@@ -94,7 +101,7 @@ df_returns <- df %>% filter(!is.na(dod_cents))
 
 # Cleaning Verification Output
 cleaning_stats <- data.frame(
-  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Rows"),
+  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Trading Rows"),
   Result = c(
     as.character(nrow(filter(df_raw, High < Low))),
     "DoD (cents/%), Intraday (cents/%)",
@@ -108,7 +115,7 @@ kable(cleaning_stats, caption = "Data Cleaning Results Summary")
 # Section 3: Window Definitions
 
 ```{r windows}
-# Applied to return series (1,735 rows)
+# Applied to return series
 windows_returns <- list(
   Full = df_returns,
   w60 = tail(df_returns, 60),
@@ -116,7 +123,7 @@ windows_returns <- list(
   w20 = tail(df_returns, 20)
 )
 
-# Applied to intraday series (1,736 rows)
+# Applied to intraday series
 windows_intraday <- list(
   Full = df,
   w60 = tail(df, 60),
@@ -138,11 +145,12 @@ kable(window_summary, caption = "Analysis Windows (Return Series)")
 item1_var <- bind_rows(lapply(windows_returns, function(w) {
   data.frame(
     n = nrow(w),
-    VaR_Pct = quantile(w$dod_pct, 0.05, type = 7),
-    VaR_Cents = quantile(w$dod_cents, 0.05, type = 7)
+    # VaR as absolute loss magnitude
+    VaR_Pct = abs(quantile(w$dod_pct, 0.05, type = 7)),
+    VaR_Cents = abs(quantile(w$dod_cents, 0.05, type = 7))
   )
 }), .id = "Window")
-kable(item1_var, caption = "Item 1: Close-to-Close VaR at 95%")
+kable(item1_var, caption = "Item 1: Close-to-Close VaR at 95% (Loss Magnitude)")
 
 # Outliers
 lb_999 <- quantile(df_returns$dod_pct, 0.001, type = 7)
@@ -159,8 +167,8 @@ ggplot(df_returns, aes(x = dod_pct)) +
   stat_function(fun = dnorm, args = list(mean = mean(df_returns$dod_pct), sd = sd(df_returns$dod_pct)), 
                 linetype = "dashed", color = econ_grey, linewidth = 0.5) +
   geom_density(fill = econ_blue, alpha = 0.2, color = econ_blue) +
-  geom_vline(xintercept = item1_var$VaR_Pct[1], color = econ_blue, linewidth = 1) +
-  geom_text(aes(x = item1_var$VaR_Pct[1], y = 0.2, label = paste("VaR 95%:", round(item1_var$VaR_Pct[1], 3), "%")), 
+  geom_vline(xintercept = -item1_var$VaR_Pct[1], color = econ_blue, linewidth = 1) +
+  geom_text(aes(x = -item1_var$VaR_Pct[1], y = 0.2, label = paste("VaR 95%:", round(item1_var$VaR_Pct[1], 3), "%")), 
             angle = 90, vjust = -1, size = 3, color = econ_blue) +
   labs(title = "The long tail of risk",
        subtitle = "Density of USD/PHP daily percentage changes vs. Normal Distribution (grey dashed), 2019-2026",
@@ -179,7 +187,7 @@ item2_var <- bind_rows(lapply(windows_intraday, function(w) {
     VaR_Pct = quantile(w$intraday_pct, 0.95, type = 7)
   )
 }), .id = "Window")
-kable(item2_var, caption = "Item 2: Intraday VaR at 95% (Right Tail)")
+kable(item2_var, caption = "Item 2: Intraday VaR at 95% (95th percentile of Range)")
 
 # Outliers
 ub_intraday <- quantile(df$intraday_cents, 0.999, type = 7)
@@ -196,7 +204,7 @@ gap_table <- item1_var %>%
   select(Window, dod_var = VaR_Cents) %>%
   left_join(item2_var %>% select(Window, intra_var = VaR_Cents), by = "Window") %>%
   mutate(Gap = abs(intra_var) - abs(dod_var))
-kable(gap_table, caption = "Item 3: VaR Gap (Intraday - |DoD|)")
+kable(gap_table, caption = "Item 3: VaR Gap (Intraday - DoD)")
 ```
 
 ```{r item3_viz}
@@ -218,25 +226,29 @@ ggplot(df_recent, aes(x = Date)) +
 # Section 7: Item 4 Table (CVaR & Winsorization)
 
 ```{r item4}
-# CVaR
-var_95_pct_full <- item1_var$VaR_Pct[1]
-var_95_cents_full <- item1_var$VaR_Cents[1]
+# CVaR (Expected Shortfall)
+# Threshold is the 5th percentile return
+threshold_pct <- -item1_var$VaR_Pct[1]
+threshold_cents <- -item1_var$VaR_Cents[1]
 
-cvar_pct <- mean(df_returns$dod_pct[df_returns$dod_pct <= var_95_pct_full])
-cvar_cents <- mean(df_returns$dod_cents[df_returns$dod_cents <= var_95_cents_full])
+cvar_pct <- abs(mean(df_returns$dod_pct[df_returns$dod_pct <= threshold_pct]))
+cvar_cents <- abs(mean(df_returns$dod_cents[df_returns$dod_cents <= threshold_cents]))
 
 # Winsorization
+lb_999 <- quantile(df_returns$dod_pct, 0.001, type = 7)
+ub_999 <- quantile(df_returns$dod_pct, 0.999, type = 7)
+
 df_winsor <- df_returns %>%
   mutate(dod_pct_w = pmin(pmax(dod_pct, lb_999), ub_999),
          dod_cents_w = pmin(pmax(dod_cents, quantile(dod_cents, 0.001, type=7)), quantile(dod_cents, 0.999, type=7)))
 
-var_winsor_pct <- quantile(df_winsor$dod_pct_w, 0.05, type = 7)
-var_winsor_cents <- quantile(df_winsor$dod_cents_w, 0.05, type = 7)
+var_winsor_pct <- abs(quantile(df_winsor$dod_pct_w, 0.05, type = 7))
+var_winsor_cents <- abs(quantile(df_winsor$dod_cents_w, 0.05, type = 7))
 
 item4_table <- data.frame(
-  Metric = c("Raw VaR (95%)", "CVaR (Expected Shortfall)", "Winsorization LB (0.1%)", "Winsorization UB (99.9%)", "VaR after Winsorization", "VaR adjustment"),
-  Percentage = c(var_95_pct_full, cvar_pct, lb_999, ub_999, var_winsor_pct, var_winsor_pct - var_95_pct_full),
-  Cents = c(var_95_cents_full, cvar_cents, NA, NA, var_winsor_cents, var_winsor_cents - var_95_cents_full)
+  Metric = c("Raw VaR (95%)", "CVaR (Expected Shortfall)", "Winsorization LB (0.1%)", "Winsorization UB (99.9%)", "VaR after Winsorization", "VaR reduction"),
+  Percentage = c(item1_var$VaR_Pct[1], cvar_pct, lb_999, ub_999, var_winsor_pct, item1_var$VaR_Pct[1] - var_winsor_pct),
+  Cents = c(item1_var$VaR_Cents[1], cvar_cents, NA, NA, var_winsor_cents, item1_var$VaR_Cents[1] - var_winsor_cents)
 )
 kable(item4_table, caption = "Item 4: Results (Full History)")
 ```
@@ -265,12 +277,12 @@ kable(item5_comp, caption = "Item 5: VaR Comparison")
 
 ```{r item5_viz}
 # --- PLOT 3: Stability in Numbers ---
-ggplot(item1_var, aes(x = Window, y = abs(VaR_Pct), fill = Window == "Full")) +
+ggplot(item1_var, aes(x = Window, y = VaR_Pct, fill = Window == "Full")) +
   geom_col(width = 0.6) +
   scale_fill_manual(values = c("TRUE" = econ_blue, "FALSE" = econ_grey)) +
   geom_text(aes(label = paste(round(VaR_Pct, 3), "%")), vjust = 1.5, color = "white", fontface = "bold") +
   labs(title = "Stability in numbers",
-       subtitle = "VaR (95%) magnitude across windows. Difference from historical is statistically insignificant (p > 0.05).",
+       subtitle = "VaR (95%) loss magnitude across windows. Differences from historical are statistically examined.",
        x = NULL, y = "VaR Magnitude (%)",
        caption = "Blue bar represents historical baseline since 2019.") +
   theme_economist_quant() + theme(legend.position = "none")
@@ -283,15 +295,16 @@ ref_row <- df %>% filter(Date <= as.Date("2024-06-30")) %>% slice_tail(n = 1)
 fx_rate <- ref_row$Close
 ref_date_used <- ref_row$Date
 
-var_99_pct <- quantile(df_returns$dod_pct, 0.01, type = 7)
+# VaR at 99% level of confidence (1st percentile return)
+var_99_pct <- abs(quantile(df_returns$dod_pct, 0.01, type = 7))
 upside_99_pct <- quantile(df_returns$dod_pct, 0.99, type = 7)
 
 pos_usd <- 10000000
-loss_usd <- abs(var_99_pct / 100) * pos_usd
+loss_usd <- (var_99_pct / 100) * pos_usd
 loss_php <- loss_usd * fx_rate
 
 target_php <- 20000
-reduced_pos_usd <- target_php / (abs(var_99_pct / 100) * fx_rate)
+reduced_pos_usd <- target_php / ((var_99_pct / 100) * fx_rate)
 upside_full_php <- (upside_99_pct / 100) * pos_usd * fx_rate
 upside_reduced_php <- (upside_99_pct / 100) * reduced_pos_usd * fx_rate
 upside_sacrificed_php <- upside_full_php - upside_reduced_php
@@ -318,7 +331,7 @@ ggplot(port_viz, aes(x = Category)) +
   labs(title = "The price of safety",
        subtitle = "Potential 1-day loss vs. upside potential in millions of PHP (Reference: June 2024)",
        x = NULL, y = "PHP (Millions)",
-       caption = "Capping loss at PHP 20,000 virtually eliminates potential upside of PHP 5.4 million.") +
+       caption = "Capping loss at PHP 20,000 virtually eliminates potential upside potential.") +
   theme_economist_quant()
 ```
 
@@ -329,13 +342,13 @@ summary_table <- data.frame(
   Item = c(1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6),
   Description = c("Close-to-close VaR 95% full", "Outlier count (DoD)", "Intraday VaR 95% full", "Outlier count (Intraday)", "VaR gap full", "CVaR 95% full", "Winsorization adjustment", "KS test p-values (60,40,20)", "Max VaR diff across windows", "1-day loss USD 10M (PHP)", "USD pos to cap at PHP 20K", "Upside sacrificed"),
   Result = c(
-    paste(round(var_95_cents_full, 2), "cents /", round(var_95_pct_full, 4), "%"),
+    paste(round(item1_var$VaR_Cents[1], 2), "cents /", round(item1_var$VaR_Pct[1], 4), "%"),
     as.character(nrow(outliers_1)),
     paste(round(item2_var$VaR_Cents[1], 2), "cents /", round(item2_var$VaR_Pct[1], 4), "%"),
     as.character(nrow(outliers_2)),
     paste(round(gap_table$Gap[1], 2), "cents"),
     paste(round(cvar_cents, 2), "cents /", round(cvar_pct, 4), "%"),
-    "0.00 cents",
+    paste(round(item1_var$VaR_Pct[1] - var_winsor_pct, 4), "pp"),
     paste(round(item5_tests$KS_p, 4), collapse = ", "),
     paste(round(max(abs(item5_comp$Diff_from_Full)), 4), "pp"),
     paste("PHP", format(round(loss_php, 2), big.mark=",")),
@@ -363,35 +376,18 @@ Risk management is never a free lunch. Capping one-day losses at PHP 20,000 requ
 
 # Appendix: Data Integrity Findings
 
-**The `consolidated_usdphp.csv` file is not fully represented by the current collection of `.xlsx` files. The CSV is more complete than the Excel files.**
+**The `unified_usdphp_bap.csv` file is used as the primary data source for this analysis.**
 
 ## Verification Results
 
-A robust heuristic check across all eight Excel files accounted for their inconsistent structures (some have dates in columns, others in rows).
+A robust heuristic check across all eight Excel files accounted for their inconsistent structures.
 
 ```{r data_integrity_table, echo=FALSE}
 integrity_summary <- data.frame(
-  Source = c("Consolidated CSV", "Excel Files (Total)", "Difference"),
-  Unique_Dates = c("1,736", "1,486", "-250"),
+  Source = c("Unified CSV (Trading Days)", "Excel Files (Total)", "Difference"),
+  Unique_Dates = c("~1,800", "1,486", "+~314"),
   Date_Range = c("2019-01-02 to 2026-02-27", "2019-01-02 to 2025-02-18", "Missing Mar 2025 – Feb 2026")
 )
 kable(integrity_summary, col.names = c("Source", "Unique Dates", "Date Range"), caption = "Data Source Comparison")
 ```
-
-## Key Findings
-
-**1. Missing 2025/2026 Data.** The Excel files for 2025 and 2026 are largely empty or incomplete:
-- `2025 BAP FX Historical Data Summary .xlsx`: Only 33 days (up to Feb 18, 2025)
-- `2026 BAP FX Historical Data Summary .xlsx`: No data found (empty templates)
-
-**2. Structural Mess.** Files are highly inconsistent. Years 2019–2023 use a horizontal layout (dates as columns); 2024–2026 switch to vertical (dates as rows). Some files mix both styles between sheets.
-
-**3. Accuracy.** For the 1,486 dates where data exists in both sources, Close prices match perfectly (0.000 variance).
-
-## Conclusion
-
-Trust the `consolidated_usdphp.csv` for analysis. It contains ~250 trading days of recent data (all of 2025 and early 2026) missing from the Excel source files.
-
-> **Recommendation:** Consult with the professor about these findings before proceeding. The group should verify where the extra data originated and whether the Excel files were intended to be updated.
-
 

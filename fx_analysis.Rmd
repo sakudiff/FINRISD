@@ -1,6 +1,6 @@
 ---
-title: "USD/PHP FX Risk Analysis | Items 1-6"
-output: 
+title: "USD/PHP FX Risk Analysis | Items 1–6"
+output:
   html_document:
     df_print: kable
     toc: true
@@ -16,6 +16,7 @@ library(knitr)
 library(e1071)
 library(ggplot2)
 library(ggrepel)
+library(tidyr)
 
 # --- ECONOMIST & QVRS THEME ---
 theme_economist_quant <- function() {
@@ -35,11 +36,12 @@ theme_economist_quant <- function() {
     )
 }
 
-econ_blue <- "#141F52" # Chicago 20
-econ_red  <- "#E3120B" # Economist Red
-econ_grey <- "#595959" # London 35
+econ_blue <- "#141F52"
+econ_red  <- "#E3120B"
+econ_grey <- "#595959"
+econ_gold <- "#D4A017"
 
-# Helper for Levene's Test (Manual Implementation)
+# Helper for Levene's Test (Manual Implementation — median-centred)
 levene_test_manual <- function(group1, group2) {
   med1 <- median(group1)
   med2 <- median(group2)
@@ -52,18 +54,19 @@ levene_test_manual <- function(group1, group2) {
 
 # Section 1: Data Load and Integrity Check
 
+Data cut-off: **27 February 2026**, per case guidelines. Weekends are removed. The CSV has already been patched for the 2021-05-20 Open typo (478.855 → 47.855).
+
 ```{r data_load}
 df_raw <- read_csv("data/unified_usdphp_bap.csv") %>%
   mutate(Date = as.Date(Date)) %>%
-  # Filter for trading days only (Monday=2, ..., Friday=6)
-  # This removes the weekends imputed by the consolidation script
+  # Enforce case cut-off: 27 Feb 2026
+  filter(Date <= as.Date("2026-02-27")) %>%
+  # Remove weekends imputed by the consolidation script (1=Sun, 7=Sat in lubridate)
   filter(wday(Date) %in% 2:6) %>%
-  # Fix specific outlier on 2021-05-20: 478.855 -> 47.855
-  mutate(Open = ifelse(Date == as.Date("2021-05-20") & Open == 478.855, 47.855, Open)) %>%
   arrange(Date)
 
 integrity_check <- data.frame(
-  Metric = c("Total Trading Row Count", "Start Date", "End Date", "Rows with High < Low"),
+  Metric = c("Total Trading Rows", "Start Date", "End Date", "Rows with High < Low"),
   Value = c(
     as.character(nrow(df_raw)),
     as.character(min(df_raw$Date)),
@@ -74,264 +77,526 @@ integrity_check <- data.frame(
 kable(integrity_check, caption = "Data Integrity Check")
 ```
 
+```{r price_history_viz}
+# --- PLOT 0: The Full Picture ---
+# Shade the three short windows to contextualise their size vs history
+shade_df <- data.frame(
+  xmin = as.Date(c(tail(df_raw$Date, 60)[1], tail(df_raw$Date, 40)[1], tail(df_raw$Date, 20)[1])),
+  xmax = max(df_raw$Date),
+  label = c("60-day", "40-day", "20-day"),
+  y    = c(54.5, 55.8, 57.1)
+)
+
+ggplot(df_raw, aes(x = Date, y = Close)) +
+  geom_rect(data = shade_df,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = label),
+            inherit.aes = FALSE, alpha = 0.12) +
+  scale_fill_manual(values = c("60-day" = econ_gold, "40-day" = econ_grey, "20-day" = econ_red),
+                    name = "Analysis window") +
+  geom_line(color = econ_blue, linewidth = 0.6) +
+  annotate("text", x = as.Date("2020-04-01"), y = 51.2,
+           label = "COVID-19\nshock", size = 3, color = econ_grey, hjust = 0) +
+  annotate("text", x = as.Date("2022-06-01"), y = 55.8,
+           label = "2022 PHP\ndepreciation", size = 3, color = econ_grey, hjust = 0) +
+  labs(title = "Seven years of USD/PHP",
+       subtitle = "Daily closing rate, 2 Jan 2019 – 27 Feb 2026 (BAP data). Shaded regions show the three short analysis windows.",
+       x = NULL, y = "PHP per USD",
+       caption = "Source: BAP Historical Data. Cut-off: 27 Feb 2026.") +
+  theme_economist_quant()
+```
+
 # Section 2: Data Cleaning
 
 ```{r data_cleaning}
-# Swap High/Low errors
+# Swap High/Low where recorded in reverse (defensive — integrity check above shows 0)
 df <- df_raw %>%
   mutate(
     ActualHigh = pmax(High, Low),
-    ActualLow = pmin(High, Low),
+    ActualLow  = pmin(High, Low),
     High = ActualHigh,
-    Low = ActualLow
+    Low  = ActualLow
   ) %>%
   select(-ActualHigh, -ActualLow)
 
-# Compute Derived Columns
+# Derive return columns
 df <- df %>%
   mutate(
-    dod_cents = (Close - lag(Close)) * 100,
-    dod_pct = (Close - lag(Close)) / lag(Close) * 100,
+    dod_cents    = (Close - lag(Close)) * 100,
+    dod_pct      = (Close - lag(Close)) / lag(Close) * 100,
     intraday_cents = (High - Low) * 100,
-    intraday_pct = (High - Low) / Low * 100
+    intraday_pct   = (High - Low) / Low * 100
   )
 
-# Separate for DoD analysis (drop NA row)
+# Drop the first row (no prior close → NA returns)
 df_returns <- df %>% filter(!is.na(dod_cents))
 
-# Cleaning Verification Output
 cleaning_stats <- data.frame(
-  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Trading Rows"),
+  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Trading Rows (DoD series)"),
   Result = c(
     as.character(nrow(filter(df_raw, High < Low))),
-    "DoD (cents/%), Intraday (cents/%)",
+    "DoD cents, DoD %, Intraday cents, Intraday %",
     as.character(nrow(df_returns))
   )
 )
 kable(cleaning_stats, caption = "Data Cleaning Results Summary")
 ```
 
-
 # Section 3: Window Definitions
 
 ```{r windows}
-# Applied to return series
+# Return series windows (for DoD / Items 1, 4, 5, 6)
 windows_returns <- list(
   Full = df_returns,
-  w60 = tail(df_returns, 60),
-  w40 = tail(df_returns, 40),
-  w20 = tail(df_returns, 20)
+  w60  = tail(df_returns, 60),
+  w40  = tail(df_returns, 40),
+  w20  = tail(df_returns, 20)
 )
 
-# Applied to intraday series
+# Intraday series windows (for Item 2; no lag dependency so use df)
 windows_intraday <- list(
   Full = df,
-  w60 = tail(df, 60),
-  w40 = tail(df, 40),
-  w20 = tail(df, 20)
+  w60  = tail(df, 60),
+  w40  = tail(df, 40),
+  w20  = tail(df, 20)
 )
 
 window_summary <- data.frame(
-  Window = names(windows_returns),
+  Window     = names(windows_returns),
   Start_Date = sapply(windows_returns, function(x) as.character(min(x$Date))),
-  n = sapply(windows_returns, nrow)
+  End_Date   = sapply(windows_returns, function(x) as.character(max(x$Date))),
+  n          = sapply(windows_returns, nrow)
 )
-kable(window_summary, caption = "Analysis Windows (Return Series)")
+kable(window_summary, caption = "Analysis Windows (Return Series, cut-off 27 Feb 2026)")
 ```
 
-# Section 4: Item 1 Tables (DoD VaR 95%)
+# Section 4: Item 1 — Close-to-Close VaR (95%, one-tail)
+
+VaR is expressed as **loss magnitude** (positive number). Using the 5th-percentile of the return distribution — i.e., we expect a loss *at least* this large on 5% of trading days.
 
 ```{r item1_tables}
+# Use factor for ordered output in tables and plots
+window_order <- c("Full", "w60", "w40", "w20")
+
 item1_var <- bind_rows(lapply(windows_returns, function(w) {
   data.frame(
-    n = nrow(w),
-    # VaR as absolute loss magnitude
-    VaR_Pct = abs(quantile(w$dod_pct, 0.05, type = 7)),
-    VaR_Cents = abs(quantile(w$dod_cents, 0.05, type = 7))
+    n         = nrow(w),
+    VaR_Pct   = abs(quantile(w$dod_pct,   0.05, type = 7)),
+    VaR_Cents = abs(quantile(w$dod_cents,  0.05, type = 7))
   )
-}), .id = "Window")
-kable(item1_var, caption = "Item 1: Close-to-Close VaR at 95% (Loss Magnitude)")
+}), .id = "Window") %>%
+  mutate(Window = factor(Window, levels = window_order)) %>%
+  arrange(Window)
 
-# Outliers
-lb_999 <- quantile(df_returns$dod_pct, 0.001, type = 7)
-ub_999 <- quantile(df_returns$dod_pct, 0.999, type = 7)
-outliers_1 <- df_returns %>% 
-  filter(dod_pct < lb_999 | dod_pct > ub_999) %>%
-  select(Date, Close, dod_pct, dod_cents)
-kable(outliers_1, caption = "Item 1: Outliers (0.1% / 99.9% Bounds)")
+kable(item1_var, digits = 4,
+      caption = "Item 1: Close-to-Close VaR at 95% Confidence (Loss Magnitude)")
+
+# Outliers: observations outside the 0.1% / 99.9% bounds of the full history
+lb_dod <- quantile(df_returns$dod_pct, 0.001, type = 7)
+ub_dod <- quantile(df_returns$dod_pct, 0.999, type = 7)
+
+outliers_1 <- df_returns %>%
+  filter(dod_pct < lb_dod | dod_pct > ub_dod) %>%
+  select(Date, Close, dod_pct, dod_cents) %>%
+  arrange(Date)
+
+kable(outliers_1, digits = 4,
+      caption = paste0("Item 1: Outliers — DoD % outside [",
+                       round(lb_dod, 4), "%, ", round(ub_dod, 4), "%] (0.1%/99.9% bounds)"))
 ```
 
 ```{r item1_viz}
 # --- PLOT 1: The Long Tail of Risk ---
+full_var_pct <- item1_var$VaR_Pct[item1_var$Window == "Full"]
+
 ggplot(df_returns, aes(x = dod_pct)) +
-  stat_function(fun = dnorm, args = list(mean = mean(df_returns$dod_pct), sd = sd(df_returns$dod_pct)), 
-                linetype = "dashed", color = econ_grey, linewidth = 0.5) +
-  geom_density(fill = econ_blue, alpha = 0.2, color = econ_blue) +
-  geom_vline(xintercept = -item1_var$VaR_Pct[1], color = econ_blue, linewidth = 1) +
-  geom_text(aes(x = -item1_var$VaR_Pct[1], y = 0.2, label = paste("VaR 95%:", round(item1_var$VaR_Pct[1], 3), "%")), 
-            angle = 90, vjust = -1, size = 3, color = econ_blue) +
+  # Empirical density
+  geom_density(fill = econ_blue, alpha = 0.20, color = econ_blue, linewidth = 0.7) +
+  # Normal reference curve
+  stat_function(fun = dnorm,
+                args = list(mean = mean(df_returns$dod_pct), sd = sd(df_returns$dod_pct)),
+                linetype = "dashed", color = econ_grey, linewidth = 0.6) +
+  # VaR line (left tail — negative, because VaR magnitude is positive)
+  geom_vline(xintercept = -full_var_pct, color = econ_red, linewidth = 1) +
+  geom_label(aes(x = -full_var_pct, y = 0.30,
+                 label = paste0("VaR 95%: ", round(full_var_pct, 3), "%")),
+             size = 3.2, color = econ_red, fill = "white", label.size = 0, vjust = 0) +
+  # Outlier markers
+  geom_rug(data = outliers_1, aes(x = dod_pct), color = econ_red, linewidth = 0.8, alpha = 0.8) +
+  geom_text_repel(data = outliers_1,
+                  aes(x = dod_pct, y = 0.02,
+                      label = format(Date, "%b %Y")),
+                  size = 2.8, color = econ_red, nudge_y = 0.05, segment.size = 0.3) +
   labs(title = "The long tail of risk",
-       subtitle = "Density of USD/PHP daily percentage changes vs. Normal Distribution (grey dashed), 2019-2026",
-       x = "Daily Change (%)", y = "Density",
-       caption = "Source: BAP Historical Data. VaR calculated using historical simulation (type 7).") +
+       subtitle = "Density of USD/PHP daily % changes vs. Normal (dashed). Red rug marks = extreme outliers (outside 99.9%).",
+       x = "Daily Close-to-Close Change (%)", y = "Density",
+       caption = "Source: BAP. Full history 2019–2026. VaR = 5th percentile of empirical distribution (type 7).") +
   theme_economist_quant()
 ```
 
-# Section 5: Item 2 Tables (Intraday VaR 95%)
+# Section 5: Item 2 — Intraday (High-to-Low) VaR (95%, one-tail)
+
+Intraday range is always non-negative, so the one-tail 95% test uses the **95th percentile** (upper tail).
 
 ```{r item2}
 item2_var <- bind_rows(lapply(windows_intraday, function(w) {
   data.frame(
-    n = nrow(w),
+    n         = nrow(w),
     VaR_Cents = quantile(w$intraday_cents, 0.95, type = 7),
-    VaR_Pct = quantile(w$intraday_pct, 0.95, type = 7)
+    VaR_Pct   = quantile(w$intraday_pct,   0.95, type = 7)
   )
-}), .id = "Window")
-kable(item2_var, caption = "Item 2: Intraday VaR at 95% (95th percentile of Range)")
+}), .id = "Window") %>%
+  mutate(Window = factor(Window, levels = window_order)) %>%
+  arrange(Window)
 
-# Outliers
+kable(item2_var, digits = 4,
+      caption = "Item 2: Intraday (High–Low) VaR at 95% Confidence (95th percentile of range)")
+
+# Outliers: above 99.9th percentile (range is one-sided positive)
 ub_intraday <- quantile(df$intraday_cents, 0.999, type = 7)
-outliers_2 <- df %>% 
+outliers_2 <- df %>%
   filter(intraday_cents > ub_intraday) %>%
-  select(Date, High, Low, intraday_cents, intraday_pct)
-kable(outliers_2, caption = "Item 2: Outliers (99.9% Bound)")
+  select(Date, High, Low, intraday_cents, intraday_pct) %>%
+  arrange(Date)
+
+kable(outliers_2, digits = 4,
+      caption = paste0("Item 2: Outliers — Intraday cents above ",
+                       round(ub_intraday, 4), " cents (99.9th percentile)"))
 ```
 
-# Section 6: Item 3 Table (Gap Analysis)
+```{r item2_viz}
+# --- PLOT 1b: Intraday volatility scatter ---
+ggplot(df, aes(x = Date, y = intraday_cents)) +
+  geom_point(color = econ_blue, alpha = 0.35, size = 0.9) +
+  geom_smooth(method = "loess", span = 0.15, se = FALSE, color = econ_red, linewidth = 0.8) +
+  geom_hline(yintercept = item2_var$VaR_Cents[item2_var$Window == "Full"],
+             linetype = "dashed", color = econ_grey, linewidth = 0.6) +
+  annotate("text", x = as.Date("2019-06-01"),
+           y = item2_var$VaR_Cents[item2_var$Window == "Full"] + 1.5,
+           label = paste0("VaR 95% (full): ",
+                          round(item2_var$VaR_Cents[item2_var$Window == "Full"], 2), " cts"),
+           size = 3, color = econ_grey, hjust = 0) +
+  geom_point(data = outliers_2, aes(x = Date, y = intraday_cents),
+             color = econ_red, size = 3) +
+  geom_text_repel(data = outliers_2, aes(x = Date, y = intraday_cents,
+                  label = format(Date, "%b %Y")),
+                  size = 2.8, color = econ_red, nudge_y = 2) +
+  labs(title = "Wide days — intraday volatility over time",
+       subtitle = "Each point = one trading day's High–Low range (cents). LOESS trend in red. Dashed = full-history VaR 95%.",
+       x = NULL, y = "Intraday Range (cents)",
+       caption = "Source: BAP. Red dots = outliers above 99.9th percentile.") +
+  theme_economist_quant()
+```
+
+# Section 6: Item 3 — Closing vs. Intraday: The Volatility Gap
 
 ```{r item3_table}
 gap_table <- item1_var %>%
   select(Window, dod_var = VaR_Cents) %>%
   left_join(item2_var %>% select(Window, intra_var = VaR_Cents), by = "Window") %>%
-  mutate(Gap = abs(intra_var) - abs(dod_var))
-kable(gap_table, caption = "Item 3: VaR Gap (Intraday - DoD)")
+  mutate(
+    Gap_Cents = intra_var - dod_var,
+    Gap_Pct_of_Intra = Gap_Cents / intra_var * 100
+  )
+kable(gap_table, digits = 4,
+      caption = "Item 3: VaR Gap (Intraday − DoD). Positive gap = intraday captures more risk than close-to-close.")
 ```
 
 ```{r item3_viz}
 # --- PLOT 2: Mind the Gap ---
-# Filter last 250 days for visibility
-df_recent <- tail(df, 250)
-
-ggplot(df_recent, aes(x = Date)) +
-  geom_line(aes(y = intraday_pct, color = "Intraday Range"), linewidth = 0.5) +
-  geom_line(aes(y = abs(dod_pct), color = "Absolute DoD Change"), linewidth = 0.5) +
-  scale_color_manual(values = c("Intraday Range" = econ_blue, "Absolute DoD Change" = econ_red)) +
+# Show full history (not just 250 days) to avoid cherry-picking the window
+ggplot(df_returns, aes(x = Date)) +
+  geom_line(aes(y = intraday_pct,   color = "Intraday Range (H-L)"), linewidth = 0.45, alpha = 0.8) +
+  geom_line(aes(y = abs(dod_pct),   color = "Abs. Close-to-Close"),  linewidth = 0.45, alpha = 0.8) +
+  scale_color_manual(values = c("Intraday Range (H-L)" = econ_blue,
+                                "Abs. Close-to-Close"  = econ_red)) +
   labs(title = "Mind the gap",
-       subtitle = "Intraday volatility (%) vs. Absolute Close-to-Close changes (%), trailing 250 days",
+       subtitle = "Intraday H-L range (%) vs absolute close-to-close change (%), full history 2019–2026.",
        x = NULL, y = "Magnitude (%)",
-       caption = "Large gaps indicate intraday chaos that 'recovers' by the closing bell.") +
+       caption = paste0("Full history. Intraday VaR 95% = ",
+                        round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4), "% vs DoD VaR 95% = ",
+                        round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4),
+                        "%. Gap shows intra-day volatility that 'recovers' by close.")) +
   theme_economist_quant()
 ```
 
-# Section 7: Item 4 Table (CVaR & Winsorization)
+# Section 7: Item 4 — Coherent Risk Measures: CVaR & Winsorization
 
 ```{r item4}
-# CVaR (Expected Shortfall)
-# Threshold is the 5th percentile return
-threshold_pct <- -item1_var$VaR_Pct[1]
-threshold_cents <- -item1_var$VaR_Cents[1]
+# CVaR (Expected Shortfall) — mean of returns below the 5th percentile
+threshold_pct   <- -item1_var$VaR_Pct[item1_var$Window == "Full"]
+threshold_cents <- -item1_var$VaR_Cents[item1_var$Window == "Full"]
 
-cvar_pct <- abs(mean(df_returns$dod_pct[df_returns$dod_pct <= threshold_pct]))
+cvar_pct   <- abs(mean(df_returns$dod_pct[df_returns$dod_pct     <= threshold_pct]))
 cvar_cents <- abs(mean(df_returns$dod_cents[df_returns$dod_cents <= threshold_cents]))
 
-# Winsorization
-lb_999 <- quantile(df_returns$dod_pct, 0.001, type = 7)
-ub_999 <- quantile(df_returns$dod_pct, 0.999, type = 7)
+# Winsorization at 0.1% / 99.9% (caps extreme values at boundary rather than removing them)
+lb_w <- quantile(df_returns$dod_pct,   0.001, type = 7)
+ub_w <- quantile(df_returns$dod_pct,   0.999, type = 7)
+lb_c <- quantile(df_returns$dod_cents, 0.001, type = 7)
+ub_c <- quantile(df_returns$dod_cents, 0.999, type = 7)
 
 df_winsor <- df_returns %>%
-  mutate(dod_pct_w = pmin(pmax(dod_pct, lb_999), ub_999),
-         dod_cents_w = pmin(pmax(dod_cents, quantile(dod_cents, 0.001, type=7)), quantile(dod_cents, 0.999, type=7)))
+  mutate(
+    dod_pct_w   = pmin(pmax(dod_pct,   lb_w), ub_w),
+    dod_cents_w = pmin(pmax(dod_cents, lb_c), ub_c)
+  )
 
-var_winsor_pct <- abs(quantile(df_winsor$dod_pct_w, 0.05, type = 7))
+var_winsor_pct   <- abs(quantile(df_winsor$dod_pct_w,   0.05, type = 7))
 var_winsor_cents <- abs(quantile(df_winsor$dod_cents_w, 0.05, type = 7))
 
+raw_var_pct   <- item1_var$VaR_Pct[item1_var$Window == "Full"]
+raw_var_cents <- item1_var$VaR_Cents[item1_var$Window == "Full"]
+
 item4_table <- data.frame(
-  Metric = c("Raw VaR (95%)", "CVaR (Expected Shortfall)", "Winsorization LB (0.1%)", "Winsorization UB (99.9%)", "VaR after Winsorization", "VaR reduction"),
-  Percentage = c(item1_var$VaR_Pct[1], cvar_pct, lb_999, ub_999, var_winsor_pct, item1_var$VaR_Pct[1] - var_winsor_pct),
-  Cents = c(item1_var$VaR_Cents[1], cvar_cents, NA, NA, var_winsor_cents, item1_var$VaR_Cents[1] - var_winsor_cents)
+  Metric = c(
+    "Raw VaR (95%)",
+    "CVaR / Expected Shortfall (95%)",
+    "Winsorization Lower Bound (0.1%)",
+    "Winsorization Upper Bound (99.9%)",
+    "VaR after Winsorization (95%)",
+    "VaR Reduction from Winsorization"
+  ),
+  Percentage = c(raw_var_pct, cvar_pct, lb_w, ub_w, var_winsor_pct,
+                 raw_var_pct - var_winsor_pct),
+  Cents      = c(raw_var_cents, cvar_cents, NA, NA, var_winsor_cents,
+                 raw_var_cents - var_winsor_cents)
 )
-kable(item4_table, caption = "Item 4: Results (Full History)")
+kable(item4_table, digits = 4, caption = "Item 4: CVaR and Winsorization Results (Full History)")
 ```
 
-# Section 8: Item 5 Tables (Significance)
+```{r item4_viz}
+# --- PLOT 3a: CVaR vs VaR tail illustration ---
+tail_returns <- df_returns %>% filter(dod_pct <= threshold_pct)
+cvar_line <- mean(tail_returns$dod_pct)
+
+ggplot(df_returns, aes(x = dod_pct)) +
+  geom_density(fill = econ_blue, alpha = 0.18, color = econ_blue, linewidth = 0.7) +
+  # Shade the tail (ES zone)
+  geom_density(data = tail_returns, aes(x = dod_pct),
+               fill = econ_red, alpha = 0.4, color = NA) +
+  geom_vline(xintercept = threshold_pct, color = econ_red, linewidth = 1) +
+  geom_vline(xintercept = cvar_line, color = econ_gold, linewidth = 1, linetype = "dashed") +
+  annotate("text", x = threshold_pct, y = 0.35,
+           label = paste0("VaR 95%\n", round(-threshold_pct, 3), "%"),
+           size = 3, color = econ_red, hjust = 1.1) +
+  annotate("text", x = cvar_line, y = 0.35,
+           label = paste0("CVaR (ES)\n", round(cvar_pct, 3), "%"),
+           size = 3, color = econ_gold, hjust = 1.1) +
+  labs(title = "Beyond the threshold: Expected Shortfall",
+       subtitle = "Red shaded region = losses beyond VaR 95%. CVaR (gold dashed) is the mean of that tail — the coherent alternative.",
+       x = "Daily Change (%)", y = "Density",
+       caption = "VaR ignores the severity of tail losses. CVaR (Expected Shortfall) captures the average loss conditional on breaching VaR.") +
+  theme_economist_quant()
+```
+
+# Section 8: Item 5 — Are the Differences Statistically Significant?
 
 ```{r item5_tables}
 full_pct <- df_returns$dod_pct
+
 item5_tests <- bind_rows(lapply(windows_returns[-1], function(w) {
-  ks <- ks.test(full_pct, w$dod_pct)
+  ks     <- ks.test(full_pct, w$dod_pct)
   levene <- levene_test_manual(full_pct, w$dod_pct)
-  data.frame(n = nrow(w), KS_Stat = ks$statistic, KS_p = ks$p.value, Levene_Stat = abs(levene$statistic), Levene_p = levene$p_value)
-}), .id = "Window")
+  data.frame(
+    n          = nrow(w),
+    KS_Stat    = ks$statistic,
+    KS_p       = ks$p.value,
+    Levene_F   = abs(levene$statistic),
+    Levene_p   = levene$p_value
+  )
+}), .id = "Window") %>%
+  mutate(Window = factor(Window, levels = c("w60", "w40", "w20"))) %>%
+  arrange(Window)
 
 item5_desc <- bind_rows(lapply(windows_returns, function(w) {
-  data.frame(n = nrow(w), Mean_Pct = mean(w$dod_pct), SD_Pct = sd(w$dod_pct), Skewness = skewness(w$dod_pct), Kurtosis = kurtosis(w$dod_pct))
-}), .id = "Window")
+  data.frame(n       = nrow(w),
+             Mean    = mean(w$dod_pct),
+             SD      = sd(w$dod_pct),
+             Skew    = skewness(w$dod_pct),
+             Kurt    = kurtosis(w$dod_pct))
+}), .id = "Window") %>%
+  mutate(Window = factor(Window, levels = window_order)) %>%
+  arrange(Window)
 
 item5_comp <- item1_var %>%
-  mutate(Diff_from_Full = VaR_Pct - VaR_Pct[1])
+  mutate(Diff_from_Full_pp = VaR_Pct - VaR_Pct[Window == "Full"]) %>%
+  arrange(Window)
 
-kable(item5_tests, caption = "Item 5: Significance Tests")
-kable(item5_desc, caption = "Item 5: Descriptive Statistics")
-kable(item5_comp, caption = "Item 5: VaR Comparison")
+kable(item5_tests, digits = 4,
+      caption = "Item 5: Significance Tests (each window vs. full history). KS = distribution equality; Levene = variance equality.")
+kable(item5_desc, digits = 4,
+      caption = "Item 5: Descriptive Statistics by Window")
+kable(item5_comp, digits = 4,
+      caption = "Item 5: VaR Comparison — difference from full-history baseline (percentage points)")
 ```
 
-```{r item5_viz}
-# --- PLOT 3: Stability in Numbers ---
-ggplot(item1_var, aes(x = Window, y = VaR_Pct, fill = Window == "Full")) +
-  geom_col(width = 0.6) +
+```{r item5_var_bar}
+# --- PLOT 4a: Stability in Numbers — VaR bar chart (ordered Full → w60 → w40 → w20) ---
+ggplot(item1_var, aes(x = Window, y = VaR_Pct,
+                      fill = Window == "Full")) +
+  geom_col(width = 0.55) +
   scale_fill_manual(values = c("TRUE" = econ_blue, "FALSE" = econ_grey)) +
-  geom_text(aes(label = paste(round(VaR_Pct, 3), "%")), vjust = 1.5, color = "white", fontface = "bold") +
+  geom_text(aes(label = paste0(round(VaR_Pct, 3), "%")),
+            vjust = 1.6, color = "white", fontface = "bold", size = 4) +
   labs(title = "Stability in numbers",
-       subtitle = "VaR (95%) loss magnitude across windows. Differences from historical are statistically examined.",
+       subtitle = "VaR 95% loss magnitude (%) by analysis window. Blue = full-history baseline (2019–2026).",
        x = NULL, y = "VaR Magnitude (%)",
-       caption = "Blue bar represents historical baseline since 2019.") +
+       caption = "Windows: Full = 1,868 obs; w60 = 60 obs; w40 = 40 obs; w20 = 20 obs.") +
   theme_economist_quant() + theme(legend.position = "none")
 ```
 
-# Section 9: Item 6 Table (Portfolio)
+```{r item5_dist_overlay}
+# --- PLOT 4b: Distribution comparison — window return distributions overlaid ---
+dist_data <- bind_rows(
+  mutate(windows_returns$Full, Window = "Full (2019–2026)"),
+  mutate(windows_returns$w60,  Window = "60-day"),
+  mutate(windows_returns$w40,  Window = "40-day"),
+  mutate(windows_returns$w20,  Window = "20-day")
+) %>%
+  mutate(Window = factor(Window,
+                         levels = c("Full (2019–2026)", "60-day", "40-day", "20-day")))
+
+win_colors <- c("Full (2019–2026)" = econ_blue,
+                "60-day"           = econ_gold,
+                "40-day"           = econ_grey,
+                "20-day"           = econ_red)
+
+ggplot(dist_data, aes(x = dod_pct, color = Window, fill = Window)) +
+  geom_density(alpha = 0.12, linewidth = 0.7) +
+  scale_color_manual(values = win_colors) +
+  scale_fill_manual(values  = win_colors) +
+  coord_cartesian(xlim = c(-2.5, 2.5)) +
+  labs(title = "Same currency, different stories",
+       subtitle = "Return distribution by analysis window. Short windows capture the current regime — not the full risk picture.",
+       x = "Daily Close-to-Close Change (%)", y = "Density",
+       caption = "KS and Levene tests assess whether differences from the full history are statistically significant.") +
+  theme_economist_quant()
+```
+
+```{r item5_rolling_var}
+# --- PLOT 4c: Rolling 60-day VaR over time ---
+roll_n <- 60
+roll_idx <- roll_n:nrow(df_returns)
+
+roll_var_pct <- sapply(roll_idx, function(i) {
+  win <- df_returns$dod_pct[(i - roll_n + 1):i]
+  abs(quantile(win, 0.05, type = 7))
+})
+
+roll_df <- data.frame(
+  Date    = df_returns$Date[roll_idx],
+  RollVaR = roll_var_pct
+)
+
+# Mark current windows
+current_w60_start <- min(windows_returns$w60$Date)
+
+ggplot(roll_df, aes(x = Date, y = RollVaR)) +
+  geom_line(color = econ_blue, linewidth = 0.6) +
+  geom_hline(yintercept = item1_var$VaR_Pct[item1_var$Window == "Full"],
+             linetype = "dashed", color = econ_grey, linewidth = 0.6) +
+  annotate("text", x = as.Date("2019-06-01"),
+           y = item1_var$VaR_Pct[item1_var$Window == "Full"] + 0.02,
+           label = paste0("Full-history VaR: ",
+                          round(item1_var$VaR_Pct[item1_var$Window == "Full"], 3), "%"),
+           size = 3, color = econ_grey, hjust = 0) +
+  geom_vline(xintercept = current_w60_start, color = econ_red,
+             linetype = "dotted", linewidth = 0.7) +
+  annotate("text", x = current_w60_start, y = max(roll_var_pct) * 0.97,
+           label = "← 60-day window starts here",
+           size = 3, color = econ_red, hjust = -0.05) +
+  labs(title = "VaR is not static",
+       subtitle = "Rolling 60-day VaR 95% (%) through time. Flat dashed line = full-history VaR benchmark.",
+       x = NULL, y = "Rolling VaR 95% (%)",
+       caption = "Demonstrates regime-dependence: short-window VaR reflects the current low-volatility period, not the full risk spectrum.") +
+  theme_economist_quant()
+```
+
+# Section 9: Item 6 — Portfolio Loss and Hedge Sizing (99% Confidence)
 
 ```{r item6_calc}
-ref_row <- df %>% filter(Date <= as.Date("2024-06-30")) %>% slice_tail(n = 1)
-fx_rate <- ref_row$Close
+# Reference: last trading day on or before 30 June 2024
+ref_row      <- df %>% filter(Date <= as.Date("2024-06-30")) %>% slice_tail(n = 1)
+fx_rate      <- ref_row$Close
 ref_date_used <- ref_row$Date
 
-# VaR at 99% level of confidence (1st percentile return)
-var_99_pct <- abs(quantile(df_returns$dod_pct, 0.01, type = 7))
-upside_99_pct <- quantile(df_returns$dod_pct, 0.99, type = 7)
+# VaR and upside at 99% (1st and 99th percentile of full DoD return series)
+var_99_pct    <- abs(quantile(df_returns$dod_pct, 0.01, type = 7))
+upside_99_pct <-    quantile(df_returns$dod_pct, 0.99, type = 7)
 
-pos_usd <- 10000000
-loss_usd <- (var_99_pct / 100) * pos_usd
-loss_php <- loss_usd * fx_rate
+# Position calculations
+pos_usd           <- 10000000
+loss_usd          <- (var_99_pct / 100) * pos_usd
+loss_php          <- loss_usd * fx_rate
 
-target_php <- 20000
-reduced_pos_usd <- target_php / ((var_99_pct / 100) * fx_rate)
-upside_full_php <- (upside_99_pct / 100) * pos_usd * fx_rate
-upside_reduced_php <- (upside_99_pct / 100) * reduced_pos_usd * fx_rate
-upside_sacrificed_php <- upside_full_php - upside_reduced_php
+target_php        <- 20000
+reduced_pos_usd   <- target_php / ((var_99_pct / 100) * fx_rate)
+usd_to_remove     <- pos_usd - reduced_pos_usd
+
+upside_full_php     <- (upside_99_pct / 100) * pos_usd * fx_rate
+upside_reduced_php  <- (upside_99_pct / 100) * reduced_pos_usd * fx_rate
+upside_sacrificed   <- upside_full_php - upside_reduced_php
 
 item6_table <- data.frame(
-  Parameter = c("Reference Date Used", "FX Rate (PHP/USD)", "VaR at 99% (%)", "USD Position", "1-Day Loss (USD)", "1-Day Loss (PHP)", "Target Max Loss (PHP)", "Reduced USD Position", "USD to Remove", "Upside Return 99% (%)", "Upside Full (PHP)", "Upside Reduced (PHP)", "Upside Sacrificed (PHP)"),
-  Value = c(as.character(ref_date_used), fx_rate, var_99_pct, pos_usd, loss_usd, loss_php, target_php, reduced_pos_usd, pos_usd - reduced_pos_usd, upside_99_pct, upside_full_php, upside_reduced_php, upside_sacrificed_php)
+  Parameter = c(
+    "Reference Date Used", "FX Rate at Reference (PHP/USD)",
+    "Full-History VaR 99% (%)", "VaR 99% (cents)",
+    "USD Position", "1-Day Loss @ 99% (USD)", "1-Day Loss @ 99% (PHP)",
+    "Target Maximum 1-Day Loss (PHP)", "Required USD Position",
+    "USD to Redeploy", "99th Percentile Upside (%)",
+    "Upside on Full Position (PHP)", "Upside on Reduced Position (PHP)",
+    "Upside Sacrificed (PHP)"
+  ),
+  Value = c(
+    as.character(ref_date_used),
+    round(fx_rate, 4),
+    round(var_99_pct, 4),
+    round(abs(quantile(df_returns$dod_cents, 0.01, type = 7)), 4),
+    format(pos_usd, big.mark = ","),
+    format(round(loss_usd, 2), big.mark = ","),
+    format(round(loss_php, 2), big.mark = ","),
+    format(target_php, big.mark = ","),
+    format(round(reduced_pos_usd, 2), big.mark = ","),
+    format(round(usd_to_remove, 2), big.mark = ","),
+    round(upside_99_pct, 4),
+    format(round(upside_full_php, 2), big.mark = ","),
+    format(round(upside_reduced_php, 2), big.mark = ","),
+    format(round(upside_sacrificed, 2), big.mark = ",")
+  )
 )
-kable(item6_table, caption = "Item 6: Portfolio Loss and Hedge Sizing")
+kable(item6_table, caption = "Item 6: Portfolio Loss and Hedge Sizing (FX Rate as of 30 Jun 2024, 99% Confidence)")
 ```
 
 ```{r item6_viz}
-# --- PLOT 4: The Price of Safety ---
+# --- PLOT 5: The Price of Safety ---
 port_viz <- data.frame(
-  Category = c("Full Exposure\n(PHP 10M)", "Capped Loss\n(Target)"),
-  Loss = c(loss_php / 1e6, target_php / 1e6),
+  Category = factor(
+    c("Full Exposure\n(USD 10M)", "Capped Loss\n(PHP 20K target)"),
+    levels = c("Full Exposure\n(USD 10M)", "Capped Loss\n(PHP 20K target)")
+  ),
+  Loss   = c(loss_php / 1e6, target_php / 1e6),
   Upside = c(upside_full_php / 1e6, upside_reduced_php / 1e6)
-)
+) %>%
+  pivot_longer(cols = c(Loss, Upside), names_to = "Direction", values_to = "Value") %>%
+  mutate(
+    SignedValue = ifelse(Direction == "Loss", -Value, Value),
+    Direction   = factor(Direction, levels = c("Upside", "Loss"))
+  )
 
-ggplot(port_viz, aes(x = Category)) +
-  geom_col(aes(y = -Loss, fill = "1-Day Loss (99%)"), width = 0.5) +
-  geom_col(aes(y = Upside, fill = "99th Percentile Upside"), width = 0.5) +
-  scale_fill_manual(values = c("1-Day Loss (99%)" = econ_red, "99th Percentile Upside" = econ_blue)) +
+ggplot(port_viz, aes(x = Category, y = SignedValue, fill = Direction)) +
+  geom_col(width = 0.5, position = "identity") +
+  geom_hline(yintercept = 0, color = "#333333", linewidth = 0.4) +
+  scale_fill_manual(values = c("Loss" = econ_red, "Upside" = econ_blue),
+                    labels = c("1-Day Loss (99%)", "99th-Pct Upside")) +
+  scale_y_continuous(labels = function(x) paste0("PHP ", abs(x), "M"),
+                     breaks = seq(-5, 5, 1)) +
   labs(title = "The price of safety",
-       subtitle = "Potential 1-day loss vs. upside potential in millions of PHP (Reference: June 2024)",
-       x = NULL, y = "PHP (Millions)",
-       caption = "Capping loss at PHP 20,000 virtually eliminates potential upside potential.") +
+       subtitle = "Potential 1-day loss (down) vs. upside potential (up), in PHP millions. Reference: FX rate as of 30 Jun 2024.",
+       x = NULL, y = "PHP (millions)",
+       caption = paste0("To cap daily loss at PHP 20,000, USD position must be reduced to USD ",
+                        format(round(reduced_pos_usd, 0), big.mark = ","),
+                        ". This sacrifices PHP ",
+                        format(round(upside_sacrificed / 1e6, 2), big.mark = ","), "M in 99th-pct upside.")) +
   theme_economist_quant()
 ```
 
@@ -339,37 +604,61 @@ ggplot(port_viz, aes(x = Category)) +
 
 ```{r summary}
 summary_table <- data.frame(
-  Item = c(1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6),
-  Description = c("Close-to-close VaR 95% full", "Outlier count (DoD)", "Intraday VaR 95% full", "Outlier count (Intraday)", "VaR gap full", "CVaR 95% full", "Winsorization adjustment", "KS test p-values (60,40,20)", "Max VaR diff across windows", "1-day loss USD 10M (PHP)", "USD pos to cap at PHP 20K", "Upside sacrificed"),
+  Item = c(1, 1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6),
+  Description = c(
+    "Close-to-close VaR 95% — full history",
+    "Outlier count (DoD, outside 0.1%/99.9%)",
+    "Outlier dates",
+    "Intraday VaR 95% — full history",
+    "Outlier count (Intraday, above 99.9%)",
+    "Intraday outlier dates",
+    "VaR gap (Intraday − DoD), full history",
+    "CVaR / Expected Shortfall 95%, full",
+    "VaR after Winsorization 95%",
+    "KS test p-values (w60, w40, w20 vs Full)",
+    "Max VaR deviation from full baseline",
+    "1-day loss, USD 10M @ 99% (PHP)",
+    "USD position to cap loss at PHP 20K",
+    "99th-pct upside sacrificed (PHP)"
+  ),
   Result = c(
-    paste(round(item1_var$VaR_Cents[1], 2), "cents /", round(item1_var$VaR_Pct[1], 4), "%"),
+    paste0(round(item1_var$VaR_Cents[item1_var$Window == "Full"], 2), " cts / ",
+           round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4), "%"),
     as.character(nrow(outliers_1)),
-    paste(round(item2_var$VaR_Cents[1], 2), "cents /", round(item2_var$VaR_Pct[1], 4), "%"),
+    paste(format(outliers_1$Date, "%d %b %Y"), collapse = "; "),
+    paste0(round(item2_var$VaR_Cents[item2_var$Window == "Full"], 2), " cts / ",
+           round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4), "%"),
     as.character(nrow(outliers_2)),
-    paste(round(gap_table$Gap[1], 2), "cents"),
-    paste(round(cvar_cents, 2), "cents /", round(cvar_pct, 4), "%"),
-    paste(round(item1_var$VaR_Pct[1] - var_winsor_pct, 4), "pp"),
+    paste(format(outliers_2$Date, "%d %b %Y"), collapse = "; "),
+    paste0(round(gap_table$Gap_Cents[gap_table$Window == "Full"], 2), " cts"),
+    paste0(round(cvar_cents, 2), " cts / ", round(cvar_pct, 4), "%"),
+    paste0(round(var_winsor_pct, 4), "% (reduction: ",
+           round(raw_var_pct - var_winsor_pct, 4), " pp)"),
     paste(round(item5_tests$KS_p, 4), collapse = ", "),
-    paste(round(max(abs(item5_comp$Diff_from_Full)), 4), "pp"),
-    paste("PHP", format(round(loss_php, 2), big.mark=",")),
-    paste("USD", format(round(reduced_pos_usd, 2), big.mark=",")),
-    paste("PHP", format(round(upside_sacrificed_php, 2), big.mark=","))
+    paste0(round(max(abs(item5_comp$Diff_from_Full_pp)), 4), " pp"),
+    paste0("PHP ", format(round(loss_php, 2), big.mark = ",")),
+    paste0("USD ", format(round(reduced_pos_usd, 2), big.mark = ",")),
+    paste0("PHP ", format(round(upside_sacrificed, 2), big.mark = ","))
   )
 )
-kable(summary_table, caption = "Final Summary Table")
+kable(summary_table, caption = "Final Summary Table — All Items")
 ```
 
 # Section 11: Strategic Risk Recommendations
 
-Based on the quantitative analysis of USD/PHP data (2019-2026), these four steps will improve the firm's risk posture:
+Based on quantitative analysis of USD/PHP BAP data (2 Jan 2019 – 27 Feb 2026):
 
 ### 1. Ditch VaR for CVaR
-Value at Risk (VaR) is a flawed metric. It is not "coherent" because it fails the test of subadditivity: it can wrongly suggest that a diversified portfolio is riskier than the sum of its parts. The institution should switch to **Conditional Value at Risk (CVaR)**. Unlike VaR, which ignores the "tail," CVaR accounts for the worst-case scenarios and behaves logically when assets are combined.
+Value at Risk (VaR) is not a **coherent** risk measure — it fails subadditivity and ignores tail severity. Switch to **Conditional VaR (CVaR / Expected Shortfall)**. CVaR measures the *average* loss in the worst 5% of scenarios rather than just the threshold, and behaves correctly when positions are aggregated.
 
-### 2. Trade Dollars for Pesos
-To cap daily losses at PHP 20,000, move capital out of dollars and into **PHP cash or T-bills**. This exploits the **Translation Invariance** of coherent risk measures: moving assets into the base currency reduces total risk $\rho(X)$ by exactly the amount moved. It is a mathematical certainty, not a forecast.
+### 2. Handle Outliers: Two Options
+- **Winsorization**: Cap extreme returns at the 0.1%/99.9% boundary rather than removing them. The data remains complete; outlier influence is bounded. VaR falls slightly after winsorization, which shows the impact is measurable but not dramatic.
+- **Switch to CVaR**: CVaR already captures the entire tail, so the *specific* outliers matter less — what matters is the average loss across all tail observations.
 
-### 3. Face the Price of Safety
-Risk management is never a free lunch. Capping one-day losses at PHP 20,000 requires gutting the dollar position so severely that it eliminates potential gains. This safety comes at an opportunity cost of approximately **PHP 5.4m** in 99th-percentile upside. Managers must decide if avoiding a small daily loss is worth sacrificing millions in potential profit.
+### 3. Short Windows Miss Structural Risk
+The rolling VaR chart (Plot 4c) makes it plain: using only 20 or 60 days of data captures the *current regime*, not the full risk spectrum. The w60 VaR is materially lower than the full-history VaR, which includes the 2022 PHP depreciation and the COVID-19 volatility spike. For prudent risk management, the full history is the appropriate baseline.
+
+### 4. Trade Dollars for Pesos — But Know the Cost
+To cap daily losses at PHP 20,000, capital must move from USD into **PHP cash or T-bills**. This exploits **Translation Invariance** of coherent risk measures: $\rho(X - c) = \rho(X) - c$, where adding a risk-free asset of the base currency reduces total risk by exactly that amount. However, capping the loss at PHP 20,000 requires gutting the USD position so severely that approximately **PHP 4.6M** in 99th-percentile upside is sacrificed. Risk reduction is never free.
 
 ---

@@ -54,15 +54,13 @@ levene_test_manual <- function(group1, group2) {
 
 # Section 1: Data Load and Integrity Check
 
-Data cut-off: **27 February 2026**, per case guidelines. Weekends are removed. The CSV has already been patched for the 2021-05-20 Open typo (478.855 → 47.855).
+Data cut-off: **27 February 2026**, per case guidelines. This analysis uses the unified master dataset containing only raw published trading days from the BAP (no imputed values). The 2021-05-20 Open typo (478.855 → 47.855) has been corrected.
 
 ```{r data_load}
-df_raw <- read_csv("data/unified_usdphp_bap.csv") %>%
+df_raw <- read_csv("data/unified/unified_bap_master.csv") %>%
   mutate(Date = as.Date(Date)) %>%
   # Enforce case cut-off: 27 Feb 2026
   filter(Date <= as.Date("2026-02-27")) %>%
-  # Remove weekends imputed by the consolidation script (1=Sun, 7=Sat in lubridate)
-  filter(wday(Date) %in% 2:6) %>%
   arrange(Date)
 
 integrity_check <- data.frame(
@@ -442,7 +440,8 @@ ggplot(item1_var, aes(x = Window, y = VaR_Pct,
   labs(title = "Stability in numbers",
        subtitle = "VaR 95% loss magnitude (%) by analysis window. Blue = full-history baseline (2019–2026).",
        x = NULL, y = "VaR Magnitude (%)",
-       caption = "Windows: Full = 1,868 obs; w60 = 60 obs; w40 = 40 obs; w20 = 20 obs.") +
+       caption = paste0("Windows: Full = ", format(nrow(df_returns), big.mark=","), 
+                        " obs; w60 = 60 obs; w40 = 40 obs; w20 = 20 obs.")) +
   theme_economist_quant() + theme(legend.position = "none")
 ```
 

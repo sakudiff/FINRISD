@@ -64,12 +64,13 @@ df_raw <- read_csv("data/unified/unified_bap_master.csv") %>%
   arrange(Date)
 
 integrity_check <- data.frame(
-  Metric = c("Total Trading Rows", "Start Date", "End Date", "Rows with High < Low"),
+  Metric = c("Total Trading Rows", "Start Date", "End Date", "Rows with High < Low", "Rows with Close outside High-Low range"),
   Value = c(
     as.character(nrow(df_raw)),
     as.character(min(df_raw$Date)),
     as.character(max(df_raw$Date)),
-    as.character(nrow(filter(df_raw, High < Low)))
+    as.character(nrow(filter(df_raw, High < Low))),
+    as.character(nrow(filter(df_raw, Close > High | Close < Low)))
   )
 )
 kable(integrity_check, caption = "Data Integrity Check")
@@ -106,11 +107,11 @@ ggplot(df_raw, aes(x = Date, y = Close)) +
 # Section 2: Data Cleaning
 
 ```{r data_cleaning}
-# Swap High/Low where recorded in reverse (defensive — integrity check above shows 0)
+# Correct High/Low bounds to encompass Open and Close (robust integrity)
 df <- df_raw %>%
   mutate(
-    ActualHigh = pmax(High, Low),
-    ActualLow  = pmin(High, Low),
+    ActualHigh = pmax(Open, High, Low, Close),
+    ActualLow  = pmin(Open, High, Low, Close),
     High = ActualHigh,
     Low  = ActualLow
   ) %>%
@@ -129,9 +130,9 @@ df <- df %>%
 df_returns <- df %>% filter(!is.na(dod_cents))
 
 cleaning_stats <- data.frame(
-  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Trading Rows (DoD series)"),
+  Metric = c("Modified High/Low Bounds", "Derived Columns", "Remaining Trading Rows (DoD series)"),
   Result = c(
-    as.character(nrow(filter(df_raw, High < Low))),
+    as.character(nrow(filter(df_raw, High < Low | Close > High | Close < Low | Open > High | Open < Low))),
     "DoD cents, DoD %, Intraday cents, Intraday %",
     as.character(nrow(df_returns))
   )
@@ -604,14 +605,20 @@ ggplot(port_viz, aes(x = Category, y = SignedValue, fill = Direction)) +
 
 ```{r summary}
 summary_table <- data.frame(
-  Item = c(1, 1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6),
+  Item = c(1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6),
   Description = c(
-    "Close-to-close VaR 95% — full history",
+    "DoD VaR 95% — Full history",
+    "DoD VaR 95% — 60-day window",
+    "DoD VaR 95% — 40-day window",
+    "DoD VaR 95% — 20-day window",
     "Outlier count (DoD, outside 0.1%/99.9%)",
-    "Outlier dates",
-    "Intraday VaR 95% — full history",
+    "Outlier dates (DoD)",
+    "Intraday VaR 95% — Full history",
+    "Intraday VaR 95% — 60-day window",
+    "Intraday VaR 95% — 40-day window",
+    "Intraday VaR 95% — 20-day window",
     "Outlier count (Intraday, above 99.9%)",
-    "Intraday outlier dates",
+    "Outlier dates (Intraday)",
     "VaR gap (Intraday − DoD), full history",
     "CVaR / Expected Shortfall 95%, full",
     "VaR after Winsorization 95%",
@@ -622,18 +629,21 @@ summary_table <- data.frame(
     "99th-pct upside sacrificed (PHP)"
   ),
   Result = c(
-    paste0(round(item1_var$VaR_Cents[item1_var$Window == "Full"], 2), " cts / ",
-           round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4), "%"),
+    paste0(round(item1_var$VaR_Cents[item1_var$Window == "Full"], 2), " cts / ", round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4), "%"),
+    paste0(round(item1_var$VaR_Cents[item1_var$Window == "w60"], 2), " cts / ", round(item1_var$VaR_Pct[item1_var$Window == "w60"], 4), "%"),
+    paste0(round(item1_var$VaR_Cents[item1_var$Window == "w40"], 2), " cts / ", round(item1_var$VaR_Pct[item1_var$Window == "w40"], 4), "%"),
+    paste0(round(item1_var$VaR_Cents[item1_var$Window == "w20"], 2), " cts / ", round(item1_var$VaR_Pct[item1_var$Window == "w20"], 4), "%"),
     as.character(nrow(outliers_1)),
     paste(format(outliers_1$Date, "%d %b %Y"), collapse = "; "),
-    paste0(round(item2_var$VaR_Cents[item2_var$Window == "Full"], 2), " cts / ",
-           round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4), "%"),
+    paste0(round(item2_var$VaR_Cents[item2_var$Window == "Full"], 2), " cts / ", round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4), "%"),
+    paste0(round(item2_var$VaR_Cents[item2_var$Window == "w60"], 2), " cts / ", round(item2_var$VaR_Pct[item2_var$Window == "w60"], 4), "%"),
+    paste0(round(item2_var$VaR_Cents[item2_var$Window == "w40"], 2), " cts / ", round(item2_var$VaR_Pct[item2_var$Window == "w40"], 4), "%"),
+    paste0(round(item2_var$VaR_Cents[item2_var$Window == "w20"], 2), " cts / ", round(item2_var$VaR_Pct[item2_var$Window == "w20"], 4), "%"),
     as.character(nrow(outliers_2)),
     paste(format(outliers_2$Date, "%d %b %Y"), collapse = "; "),
     paste0(round(gap_table$Gap_Cents[gap_table$Window == "Full"], 2), " cts"),
     paste0(round(cvar_cents, 2), " cts / ", round(cvar_pct, 4), "%"),
-    paste0(round(var_winsor_pct, 4), "% (reduction: ",
-           round(raw_var_pct - var_winsor_pct, 4), " pp)"),
+    paste0(round(var_winsor_pct, 4), "% (reduction: ", round(raw_var_pct - var_winsor_pct, 4), " pp)"),
     paste(round(item5_tests$KS_p, 4), collapse = ", "),
     paste0(round(max(abs(item5_comp$Diff_from_Full_pp)), 4), " pp"),
     paste0("PHP ", format(round(loss_php, 2), big.mark = ",")),
@@ -646,7 +656,7 @@ kable(summary_table, caption = "Final Summary Table — All Items")
 
 # Section 11: Strategic Risk Recommendations
 
-Based on quantitative analysis of USD/PHP BAP data (2 Jan 2019 – 27 Feb 2026):
+Based on quantitative analysis of USD/PHP BAP data (`r format(min(df$Date), "%d %b %Y")` – `r format(max(df$Date), "%d %b %Y")`):
 
 ### 1. Ditch VaR for CVaR
 Value at Risk (VaR) is not a **coherent** risk measure — it fails subadditivity and ignores tail severity. Switch to **Conditional VaR (CVaR / Expected Shortfall)**. CVaR measures the *average* loss in the worst 5% of scenarios rather than just the threshold, and behaves correctly when positions are aggregated.
@@ -659,6 +669,6 @@ Value at Risk (VaR) is not a **coherent** risk measure — it fails subadditivit
 The rolling VaR chart (Plot 4c) makes it plain: using only 20 or 60 days of data captures the *current regime*, not the full risk spectrum. The w60 VaR is materially lower than the full-history VaR, which includes the 2022 PHP depreciation and the COVID-19 volatility spike. For prudent risk management, the full history is the appropriate baseline.
 
 ### 4. Trade Dollars for Pesos — But Know the Cost
-To cap daily losses at PHP 20,000, capital must move from USD into **PHP cash or T-bills**. This exploits **Translation Invariance** of coherent risk measures: $\rho(X - c) = \rho(X) - c$, where adding a risk-free asset of the base currency reduces total risk by exactly that amount. However, capping the loss at PHP 20,000 requires gutting the USD position so severely that approximately **PHP 4.6M** in 99th-percentile upside is sacrificed. Risk reduction is never free.
+To cap daily losses at PHP 20,000, capital must move from USD into **PHP cash or T-bills**. This exploits **Translation Invariance** of coherent risk measures: $\rho(X - c) = \rho(X) - c$, where adding a risk-free asset of the base currency reduces total risk by exactly that amount. However, capping the loss at PHP 20,000 requires gutting the USD position so severely that approximately **PHP `r format(round(upside_sacrificed / 1e6, 2))`M** in 99th-percentile upside is sacrificed. Risk reduction is never free.
 
 ---

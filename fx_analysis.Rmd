@@ -373,21 +373,3 @@ To cap daily losses at PHP 20,000, move capital out of dollars and into **PHP ca
 Risk management is never a free lunch. Capping one-day losses at PHP 20,000 requires gutting the dollar position so severely that it eliminates potential gains. This safety comes at an opportunity cost of approximately **PHP 5.4m** in 99th-percentile upside. Managers must decide if avoiding a small daily loss is worth sacrificing millions in potential profit.
 
 ---
-
-# Appendix: Data Integrity Findings
-
-**The `unified_usdphp_bap.csv` file is used as the primary data source for this analysis.**
-
-## Verification Results
-
-A robust heuristic check across all eight Excel files accounted for their inconsistent structures.
-
-```{r data_integrity_table, echo=FALSE}
-integrity_summary <- data.frame(
-  Source = c("Unified CSV (Trading Days)", "Excel Files (Total)", "Difference"),
-  Unique_Dates = c("~1,800", "1,486", "+~314"),
-  Date_Range = c("2019-01-02 to 2026-02-27", "2019-01-02 to 2025-02-18", "Missing Mar 2025 – Feb 2026")
-)
-kable(integrity_summary, col.names = c("Source", "Unique Dates", "Date Range"), caption = "Data Source Comparison")
-```
-

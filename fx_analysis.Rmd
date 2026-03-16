@@ -6,7 +6,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
 library(readr)
 library(dplyr)
 library(lubridate)
@@ -91,6 +91,17 @@ df <- df %>%
 
 # Separate for DoD analysis (drop NA row)
 df_returns <- df %>% filter(!is.na(dod_cents))
+
+# Cleaning Verification Output
+cleaning_stats <- data.frame(
+  Metric = c("Swapped High/Low Count", "Derived Columns", "Remaining Rows"),
+  Result = c(
+    as.character(nrow(filter(df_raw, High < Low))),
+    "DoD (cents/%), Intraday (cents/%)",
+    as.character(nrow(df_returns))
+  )
+)
+kable(cleaning_stats, caption = "Data Cleaning Results Summary")
 ```
 
 
@@ -347,5 +358,40 @@ To cap daily losses at PHP 20,000, move capital out of dollars and into **PHP ca
 
 ### 3. Face the Price of Safety
 Risk management is never a free lunch. Capping one-day losses at PHP 20,000 requires gutting the dollar position so severely that it eliminates potential gains. This safety comes at an opportunity cost of approximately **PHP 5.4m** in 99th-percentile upside. Managers must decide if avoiding a small daily loss is worth sacrificing millions in potential profit.
+
+---
+
+# Appendix: Data Integrity Findings
+
+**The `consolidated_usdphp.csv` file is not fully represented by the current collection of `.xlsx` files. The CSV is more complete than the Excel files.**
+
+## Verification Results
+
+A robust heuristic check across all eight Excel files accounted for their inconsistent structures (some have dates in columns, others in rows).
+
+```{r data_integrity_table, echo=FALSE}
+integrity_summary <- data.frame(
+  Source = c("Consolidated CSV", "Excel Files (Total)", "Difference"),
+  Unique_Dates = c("1,736", "1,486", "-250"),
+  Date_Range = c("2019-01-02 to 2026-02-27", "2019-01-02 to 2025-02-18", "Missing Mar 2025 – Feb 2026")
+)
+kable(integrity_summary, col.names = c("Source", "Unique Dates", "Date Range"), caption = "Data Source Comparison")
+```
+
+## Key Findings
+
+**1. Missing 2025/2026 Data.** The Excel files for 2025 and 2026 are largely empty or incomplete:
+- `2025 BAP FX Historical Data Summary .xlsx`: Only 33 days (up to Feb 18, 2025)
+- `2026 BAP FX Historical Data Summary .xlsx`: No data found (empty templates)
+
+**2. Structural Mess.** Files are highly inconsistent. Years 2019–2023 use a horizontal layout (dates as columns); 2024–2026 switch to vertical (dates as rows). Some files mix both styles between sheets.
+
+**3. Accuracy.** For the 1,486 dates where data exists in both sources, Close prices match perfectly (0.000 variance).
+
+## Conclusion
+
+Trust the `consolidated_usdphp.csv` for analysis. It contains ~250 trading days of recent data (all of 2025 and early 2026) missing from the Excel source files.
+
+> **Recommendation:** Consult with the professor about these findings before proceeding. The group should verify where the extra data originated and whether the Excel files were intended to be updated.
 
 

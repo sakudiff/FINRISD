@@ -305,17 +305,18 @@ kable(gap_table, digits = 4,
 # --- PLOT 2: Mind the Gap ---
 # Show full history (not just 250 days) to avoid cherry-picking the window
 ggplot(df_returns, aes(x = Date)) +
-  geom_line(aes(y = intraday_pct,   color = "Intraday Range (H-L)"), linewidth = 0.45, alpha = 0.8) +
-  geom_line(aes(y = abs(dod_pct),   color = "Abs. Close-to-Close"),  linewidth = 0.45, alpha = 0.8) +
+  geom_hline(yintercept = 0, color = econ_grey, linewidth = 0.3) +
+  geom_line(aes(y = intraday_pct,   color = "Intraday Range (H-L)"), linewidth = 0.45, alpha = 0.7) +
+  geom_line(aes(y = dod_pct,        color = "Close-to-Close Change"), linewidth = 0.45, alpha = 0.8) +
   scale_color_manual(values = c("Intraday Range (H-L)" = econ_blue,
-                                "Abs. Close-to-Close"  = econ_red)) +
+                                "Close-to-Close Change"  = econ_red)) +
   labs(title = "Mind the gap",
-       subtitle = "Intraday H-L range (%) vs absolute close-to-close change (%), full history 2019–2026.",
-       x = NULL, y = "Magnitude (%)",
+       subtitle = "Intraday H-L range (%) vs signed close-to-close change (%), full history 2019–2026.",
+       x = NULL, y = "Change / Range (%)",
        caption = paste0("Full history. Intraday VaR 95% = ",
                         round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4), "% vs DoD VaR 95% = ",
                         round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4),
-                        "%. Gap shows intra-day volatility that 'recovers' by close.")) +
+                        "%. Note how intraday range often dwarfs the net daily move.")) +
   theme_economist_quant()
 ```
 

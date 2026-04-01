@@ -1,43 +1,58 @@
-import pandas as pd
+"""
+BAP FX Lossless Verification Tool.
+Audits the extraction process by comparing raw Excel row counts and values 
+against the unified CSV outputs.
+"""
+
 import glob
 import os
+from typing import List, Tuple, Optional
 
-def count_excel_rows(file_path):
+import pandas as pd
+
+
+def count_excel_records(file_path: str) -> Tuple[int, List[Tuple[pd.Timestamp, float]]]:
+    """
+    Heuristically counts valid trading records in an Excel file.
+    
+    Args:
+        file_path: Path to the raw Excel file.
+        
+    Returns:
+        A tuple of (Total Record Count, List of (Date, Close) samples for spot-checking).
+    """
     xl = pd.ExcelFile(file_path)
-    total_valid_rows = 0
-    sample_values = []
+    total_records = 0
+    samples: List[Tuple[pd.Timestamp, float]] = []
     
     for sheet_name in xl.sheet_names:
         df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
         
-        # Detection logic for 2019-2023 (transposed vs standard)
+        # Determine layout (Transposed vs Standard)
         first_row_dates = pd.to_datetime(df.iloc[0, 1:], errors='coerce')
         first_col_dates = pd.to_datetime(df.iloc[1:, 0], errors='coerce')
         is_transposed = first_row_dates.notna().sum() > first_col_dates.notna().sum()
         
         if is_transposed:
-            # Dates in Row 0, Data in Rows below (OPEN, HIGH, LOW, CLOSE)
-            # Find which row has "CLOSE"
+            # Row-based features
             close_row_idx = -1
             for i in range(len(df)):
-                if str(df.iloc[i, 0]).upper().strip() == "CLOSE":
+                label = str(df.iloc[i, 0]).upper().strip()
+                if label == "CLOSE":
                     close_row_idx = i
                     break
             
             if close_row_idx != -1:
-                # Count valid numeric closes in that row
                 closes = pd.to_numeric(df.iloc[close_row_idx, 1:], errors='coerce')
                 dates = pd.to_datetime(df.iloc[0, 1:], errors='coerce')
                 valid_mask = closes.notna() & dates.notna()
-                total_valid_rows += valid_mask.sum()
+                total_records += int(valid_mask.sum())
                 
-                # Pick a sample
                 if valid_mask.any():
                     idx = valid_mask.idxmax()
-                    sample_values.append((dates[idx], closes[idx]))
+                    samples.append((pd.Timestamp(dates[idx]), float(closes[idx])))
         else:
-            # Standard: Dates in Col 0, OHLC in other columns
-            # Find the header row to know which column is CLOSE
+            # Column-based features
             header_row_idx = -1
             for i in range(min(15, len(df))):
                 row_vals = [str(val).upper().strip() for val in df.iloc[i].values]
@@ -48,26 +63,25 @@ def count_excel_rows(file_path):
             if header_row_idx != -1:
                 headers = [str(val).upper().strip() for val in df.iloc[header_row_idx].values]
                 close_col_idx = headers.index("CLOSE")
-                # Count valid numeric closes in that column
+                
                 closes = pd.to_numeric(df.iloc[header_row_idx+1:, close_col_idx], errors='coerce')
                 dates = pd.to_datetime(df.iloc[header_row_idx+1:, 0], errors='coerce')
                 valid_mask = closes.notna() & dates.notna()
-                total_valid_rows += valid_mask.sum()
+                total_records += int(valid_mask.sum())
                 
                 if valid_mask.any():
                     idx = valid_mask.idxmax()
-                    sample_values.append((dates[idx], closes[idx]))
+                    samples.append((pd.Timestamp(dates[idx]), float(closes[idx])))
                     
-    return total_valid_rows, sample_values
+    return total_records, samples
 
-def main():
+
+def main() -> None:
+    """Orchestrates the lossless verification audit."""
     years = range(2019, 2027)
-    results = []
     
-    print("Verification of Lossless Conversion:")
-    print("-" * 60)
-    print(f"{'Year':<6} | {'Excel Rows':<12} | {'CSV Rows':<10} | {'Status':<10}")
-    print("-" * 60)
+    print(f"{'Year':<6} | {'Excel Recs':<12} | {'CSV Recs':<10} | {'Status':<12}")
+    print("-" * 55)
     
     for year in years:
         pattern = f"data/{year} BAP*.xlsx"
@@ -75,34 +89,38 @@ def main():
         if not matches:
             continue
             
-        excel_file = matches[0]
-        csv_file = f"data/unified_{year}_bap.csv"
+        excel_path = matches[0]
+        csv_path = f"data/unified/unified_{year}_bap.csv"
         
-        # Get Excel Count
-        ex_count, samples = count_excel_rows(excel_file)
+        if not os.path.exists(csv_path):
+            print(f"{year:<6} | {'MISSING':<12} | {'-':<10} | {'-':<12}")
+            continue
+            
+        # Audit Excel
+        excel_count, samples = count_excel_records(excel_path)
         
-        # Get CSV Count
-        csv_df = pd.read_csv(csv_file)
+        # Audit CSV
+        csv_df = pd.read_csv(csv_path)
         csv_count = len(csv_df)
         csv_df['Date'] = pd.to_datetime(csv_df['Date'])
         
-        status = "OK" if ex_count == csv_count else f"DIFF ({csv_count - ex_count:+})"
+        status = "VERIFIED" if excel_count == csv_count else f"DELTA({csv_count - excel_count:+})"
         
-        # Spot check
-        mismatch = False
+        # Perform Spot Check on specific values
         for s_date, s_close in samples:
             match_row = csv_df[csv_df['Date'] == s_date]
-            if match_row.empty or abs(match_row.iloc[0]['Close'] - s_close) > 0.0001:
-                mismatch = True
+            if match_row.empty:
+                status = "MISSING DATE"
                 break
-        
-        if mismatch:
-            status = "VALUE ERROR"
+            if abs(match_row.iloc[0]['Close'] - s_close) > 1e-5:
+                status = "VAL MISMATCH"
+                break
             
-        print(f"{year:<6} | {ex_count:<12} | {csv_count:<10} | {status:<10}")
+        print(f"{year:<6} | {excel_count:<12} | {csv_count:<10} | {status:<12}")
         
-    print("-" * 60)
-    print("Verification complete.")
+    print("-" * 55)
+    print("Audit process concluded.")
+
 
 if __name__ == "__main__":
     main()

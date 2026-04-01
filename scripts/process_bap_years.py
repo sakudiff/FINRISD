@@ -1,92 +1,117 @@
-import pandas as pd
-import os
-import glob
+"""
+Mid-Term BAP FX Extraction Engine (2020-2023).
+Processes yearly Excel summaries using a dual-layout detection heuristic.
+"""
 
-def process_bap_file(input_path, output_path):
+import glob
+import os
+from typing import List
+
+import pandas as pd
+
+
+def process_bap_file(input_path: str, output_path: str) -> None:
+    """
+    Extracts and unifies BAP FX data from a single yearly Excel file.
+    
+    Args:
+        input_path: Path to the raw Excel file.
+        output_path: Destination for the unified CSV.
+    """
+    if not os.path.exists(input_path):
+        print(f"  [ERROR] Source file {input_path} is missing.")
+        return
+
     print(f"Loading {input_path}...")
     xl = pd.ExcelFile(input_path)
     
-    combined_data = []
+    extracted_series: List[pd.DataFrame] = []
     
     for sheet_name in xl.sheet_names:
         print(f"  Processing sheet: {sheet_name}")
         df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
         
-        # Detection logic for transposed vs standard
+        # Heuristic for layout detection: Check for date concentration in Row 0 vs Column 0.
         first_row_dates = pd.to_datetime(df.iloc[0, 1:], errors='coerce')
         first_col_dates = pd.to_datetime(df.iloc[1:, 0], errors='coerce')
         
         is_transposed = first_row_dates.notna().sum() > first_col_dates.notna().sum()
         
         if is_transposed:
-            # Transpose
+            print(f"    [DEBUG] Transposed layout detected.")
             df = df.T
             df.columns = df.iloc[0]
             df = df.drop(df.index[0])
             df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
         else:
-            # Standard
+            print(f"    [DEBUG] Standard layout detected.")
             df.columns = df.iloc[0]
             df = df.drop(df.index[0])
             df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
             
-        # Clean up column names
-        new_cols = {}
+        # Standardize column mapping via string matching
+        mapping = {}
         for col in df.columns:
             c_str = str(col).upper().strip()
-            if 'OPEN' in c_str: new_cols[col] = 'Open'
-            elif 'HIGH' in c_str: new_cols[col] = 'High'
-            elif 'LOW' in c_str: new_cols[col] = 'Low'
-            elif 'CLOSE' in c_str: new_cols[col] = 'Close'
+            if 'OPEN' in c_str: mapping[col] = 'Open'
+            elif 'HIGH' in c_str: mapping[col] = 'High'
+            elif 'LOW' in c_str: mapping[col] = 'Low'
+            elif 'CLOSE' in c_str: mapping[col] = 'Close'
+            elif 'DATE' in c_str: mapping[col] = 'Date'
         
-        df.rename(columns=new_cols, inplace=True)
+        df = df.rename(columns=mapping)
         
-        # Filter for only OHLC + Date
-        cols_to_keep = ['Date', 'Open', 'High', 'Low', 'Close']
-        existing_cols = [c for c in cols_to_keep if c in df.columns]
-        df = df[existing_cols]
+        # Subset to required OHLC features
+        required_cols = ['Date', 'Open', 'High', 'Low', 'Close']
+        found_cols = [c for c in required_cols if c in df.columns]
+        df = df[found_cols]
         
-        # Drop invalid dates and rows where all OHLC are NaN
+        # Temporal sanitization
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
         
-        # Ensure numeric values
-        for val_col in ['Open', 'High', 'Low', 'Close']:
-            if val_col in df.columns:
-                df[val_col] = pd.to_numeric(df[val_col], errors='coerce')
+        # Numerical sanitization
+        numeric_cols = ['Open', 'High', 'Low', 'Close']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        df = df.dropna(subset=['Open', 'High', 'Low', 'Close'], how='all')
+        # Remove empty trading days (metadata artifacts)
+        df = df.dropna(subset=numeric_cols, how='all')
         
-        combined_data.append(df)
+        extracted_series.append(df)
     
-    if not combined_data:
-        print(f"  No data extracted from {input_path}!")
+    if not extracted_series:
+        print(f"  [WARN] No data extracted from {input_path}.")
         return
         
-    unified_df = pd.concat(combined_data, ignore_index=True)
+    unified_df = pd.concat(extracted_series, ignore_index=True)
     unified_df = unified_df.sort_values('Date').drop_duplicates(subset=['Date'])
     
-    # Invariant Fix: High must be >= Low
+    # Invariant Verification: High >= Low
     swapped = (unified_df['High'] < unified_df['Low'])
     if swapped.any():
-        print(f"  Fixing {swapped.sum()} rows where High < Low")
+        print(f"    [FIX] Reconciling {swapped.sum()} rows where High < Low.")
         unified_df.loc[swapped, ['High', 'Low']] = unified_df.loc[swapped, ['Low', 'High']].values
     
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     unified_df.to_csv(output_path, index=False)
-    print(f"Success. Unified data saved to {output_path}")
+    print(f"Success. Data persisted to {output_path}")
 
-def main():
+
+def main() -> None:
+    """Orchestrates extraction for the 2020-2023 range."""
     years = [2020, 2021, 2022, 2023]
     for year in years:
-        # Match files starting with year
         pattern = f"data/{year} BAP*.xlsx"
         matches = glob.glob(pattern)
         if matches:
             input_file = matches[0]
-            output_file = f"data/unified_{year}_bap.csv"
+            output_file = f"data/unified/unified_{year}_bap.csv"
             process_bap_file(input_file, output_file)
         else:
             print(f"No file found for year {year} matching {pattern}")
+
 
 if __name__ == "__main__":
     main()

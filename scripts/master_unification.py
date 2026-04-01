@@ -1,66 +1,86 @@
-import pandas as pd
+"""
+Master BAP FX Unification Engine.
+Aggregates yearly CSVs into a single master record with strict overlap validation.
+"""
+
 import glob
 import os
+from typing import List, Set
 
-def check_integrity(df_old, df_new, year):
-    # Schema check
-    if not df_old.columns.equals(df_new.columns):
-        raise ValueError(f"Schema mismatch in {year}! Expected {df_old.columns}, got {df_new.columns}")
+import pandas as pd
+
+
+def check_integrity(df_master: pd.DataFrame, df_new: pd.DataFrame, source_label: str) -> None:
+    """
+    Validates schema and data consistency between the master record and new data.
     
-    # Overlap check
-    common_dates = set(df_old['Date']).intersection(set(df_new['Date']))
+    Args:
+        df_master: The existing master DataFrame.
+        df_new: The new yearly DataFrame to be integrated.
+        source_label: Identifier for the source file (for logging).
+        
+    Raises:
+        ValueError: If schema mismatch or data contradiction is detected.
+    """
+    # Schema validation
+    if not df_master.columns.equals(df_new.columns):
+        raise ValueError(f"Schema mismatch in {source_label}! Master: {df_master.columns}, New: {df_new.columns}")
+    
+    # Overlap and consistency check
+    common_dates: Set[str] = set(df_master['Date']).intersection(set(df_new['Date']))
     if common_dates:
-        print(f"  [!] Found {len(common_dates)} overlapping dates in {year} data.")
-        # Verify values match for common dates
-        for d in sorted(list(common_dates)):
-            old_val = df_old[df_old['Date'] == d].iloc[0]['Close']
-            new_val = df_new[df_new['Date'] == d].iloc[0]['Close']
-            if abs(old_val - new_val) > 0.0001:
-                print(f"    [CRITICAL] Value mismatch on {d}: Old={old_val}, New={new_val}")
-            else:
-                print(f"    Overlap date {d} verified: values match.")
+        print(f"  [INFO] Found {len(common_dates)} overlapping dates in {source_label}.")
+        for date_str in sorted(list(common_dates)):
+            master_close = df_master[df_master['Date'] == date_str].iloc[0]['Close']
+            new_close = df_new[df_new['Date'] == date_str].iloc[0]['Close']
+            
+            # Allow for floating point epsilon
+            if abs(master_close - new_close) > 1e-5:
+                raise ValueError(f"CRITICAL: Value contradiction on {date_str} in {source_label}. "
+                                 f"Master={master_close}, New={new_close}")
 
-def main():
+
+def main() -> None:
+    """Orchestrates the unification of all yearly BAP CSVs."""
     csv_files = sorted(glob.glob("data/unified/unified_20*_bap.csv"))
     if not csv_files:
-        print("No source CSVs found in data/unified/")
+        print("[ERROR] No source CSVs found in data/unified/. Run extraction scripts first.")
         return
 
-    print("Starting master unification one-by-one...")
+    print("Executing master unification...")
     
-    # Initialize with the first year (2019)
+    # Initialize master with the first available year
     master_df = pd.read_csv(csv_files[0])
     master_df['Date'] = pd.to_datetime(master_df['Date']).dt.strftime('%Y-%m-%d')
-    print(f"Initialized with {os.path.basename(csv_files[0])} ({len(master_df)} rows)")
+    print(f"Initialized with {os.path.basename(csv_files[0])} ({len(master_df)} records)")
 
-    for f in csv_files[1:]:
-        year_file = os.path.basename(f)
-        current_df = pd.read_csv(f)
+    for file_path in csv_files[1:]:
+        source_name = os.path.basename(file_path)
+        current_df = pd.read_csv(file_path)
         current_df['Date'] = pd.to_datetime(current_df['Date']).dt.strftime('%Y-%m-%d')
         
-        print(f"Processing {year_file}...")
+        print(f"Integrating {source_name}...")
         
-        # Check integrity before merge
-        check_integrity(master_df, current_df, year_file)
+        # Verify integrity before merging
+        check_integrity(master_df, current_df, source_name)
         
-        # Merge
-        initial_count = len(master_df)
-        new_rows_count = len(current_df)
-        
+        initial_size = len(master_df)
         master_df = pd.concat([master_df, current_df], ignore_index=True)
         
-        # Deduplicate and Sort
+        # Deduplicate and sort O(N log N)
         master_df = master_df.drop_duplicates(subset=['Date']).sort_values('Date')
         
-        final_count = len(master_df)
-        print(f"  Merged {new_rows_count} rows. Total rows now: {final_count} (Net change: {final_count - initial_count})")
+        final_size = len(master_df)
+        print(f"  Merged records. Growth: {initial_size} -> {final_size} (+{final_size - initial_size})")
 
     output_path = "data/unified/unified_bap_master.csv"
     master_df.to_csv(output_path, index=False)
-    print("-" * 50)
-    print(f"SUCCESS: Master unified file created at {output_path}")
-    print(f"Final dataset spans {master_df['Date'].min()} to {master_df['Date'].max()}")
-    print(f"Total trading days: {len(master_df)}")
+    
+    print("\nUNIFICATION COMPLETE")
+    print(f"Destination: {output_path}")
+    print(f"Temporal Span: {master_df['Date'].min()} to {master_df['Date'].max()}")
+    print(f"Total Trading Days: {len(master_df)}")
+
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,54 @@ output:
     theme: flatly
 ---
 
+**Risk Management & Derivatives FINRISD Section C02**  
+**Professor: Bismark**  
+**Term, AY: 2nd term AY 2025-2026**
+
+---
+
+**Group 2 Members**
+
+| Name | Email |
+|------|-------|
+| Antiado, Leonna Feliciano | [leonna_antiado@dlsu.edu.ph](mailto:leonna_antiado@dlsu.edu.ph) |
+| Bolanos, Benedict Ramos | [benedict_bolanos@dlsu.edu.ph](mailto:benedict_bolanos@dlsu.edu.ph) |
+| Patajo, Juliana Toleco | *(DLSU email not provided)* |
+| Siapno, Dana Mae Pataratas | [dana_siapno@dlsu.edu.ph](mailto:dana_siapno@dlsu.edu.ph) |
+| Sison, Aaron Joshua Estacio | [aaron_sison@dlsu.edu.ph](mailto:aaron_sison@dlsu.edu.ph) |
+| Uy, Jill Anne Garcia | [jill_uy@dlsu.edu.ph](mailto:jill_uy@dlsu.edu.ph) |
+
+---
+
+<style>
+.guide-question {
+  border: 1px solid #d6dce2;
+  border-left: 5px solid #141F52;
+  border-radius: 0 4px 4px 0;
+  padding: 14px 20px;
+  margin: 22px 0 26px 0;
+  background-color: #f7f9fb;
+}
+.guide-question .gq-label {
+  font-size: 0.88em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #141F52;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #d6dce2;
+  display: inline-block;
+  padding-bottom: 2px;
+}
+.guide-question p {
+  font-size: 0.92em;
+  color: #2d2d2d;
+  line-height: 1.65;
+  margin-bottom: 8px;
+}
+.guide-question p:last-child { margin-bottom: 0; }
+</style>
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
 library(readr)
@@ -18,7 +66,7 @@ library(ggplot2)
 library(ggrepel)
 library(tidyr)
 
-# --- ECONOMIST & QVRS THEME ---
+# Custom ggplot2 theme for Economist-style quantitative charts
 theme_economist_quant <- function() {
   theme_minimal() +
     theme(
@@ -41,7 +89,7 @@ econ_red  <- "#E3120B"
 econ_grey <- "#595959"
 econ_gold <- "#D4A017"
 
-# Helper for Levene's Test (Manual Implementation — median-centred)
+# Levene test via median-centred absolute deviations, implemented as a two-sample t-test
 levene_test_manual <- function(group1, group2) {
   med1 <- median(group1)
   med2 <- median(group2)
@@ -77,8 +125,8 @@ kable(integrity_check, caption = "Data Integrity Check")
 ```
 
 ```{r price_history_viz}
-# --- PLOT 0: The Full Picture ---
-# Shade the three short windows to contextualise their size vs history
+# Full price history chart with shaded analysis windows
+# Shade the 60, 40, and 20-day windows to show their size relative to the full history
 shade_df <- data.frame(
   xmin = as.Date(c(tail(df_raw$Date, 60)[1], tail(df_raw$Date, 40)[1], tail(df_raw$Date, 20)[1])),
   xmax = max(df_raw$Date),
@@ -142,6 +190,8 @@ kable(cleaning_stats, caption = "Data Cleaning Results Summary")
 
 # Section 3: Window Definitions
 
+Four analysis windows are defined for both the return and intraday series. Windows (b)–(d) use only their own observations — all earlier data is strictly excluded from VaR computation.
+
 ```{r windows}
 # Return series windows (for DoD / Items 1, 4, 5, 6)
 windows_returns <- list(
@@ -170,7 +220,14 @@ kable(window_summary, caption = "Analysis Windows (Return Series, cut-off 27 Feb
 
 # Section 4: Item 1 — Close-to-Close VaR (95%, one-tail)
 
-VaR is expressed as **loss magnitude** (positive number). Using the 5th-percentile of the return distribution — i.e., we expect a loss *at least* this large on 5% of trading days.
+Movement metric: day-on-day (DoD) closing change, in PHP cents and %. VaR = 5th percentile of the return distribution, one-tailed at 95% confidence, expressed as a positive loss magnitude.
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 1 &middot; 10 Points</div>
+<p>Determine the Value at Risk for USD / PHP using the day on day closing movement. Use a one tail test at the 95% level of confidence. Use data from starting from [a] 01 January 2019, the [b] past 20, [c] 40 and [d] 60 trading days to produce four value at risk figures. For items b, c and d exclude data outside of the past 20, 40 and 60 days.</p>
+<p>Present the figures in cents and in day on day % movement.</p>
+<p>Are there any major outliers within the data set? If so, at what dates? Outliers here refer to observations outside the 99.9% of the total observations.</p>
+</div>
 
 ```{r item1_tables}
 # Use factor for ordered output in tables and plots
@@ -204,22 +261,22 @@ kable(outliers_1, digits = 4,
 ```
 
 ```{r item1_viz}
-# --- PLOT 1: The Long Tail of Risk ---
+# Empirical density vs Normal reference with VaR line and outlier rug
 full_var_pct <- item1_var$VaR_Pct[item1_var$Window == "Full"]
 
 ggplot(df_returns, aes(x = dod_pct)) +
-  # Empirical density
+  # Empirical return density
   geom_density(fill = econ_blue, alpha = 0.20, color = econ_blue, linewidth = 0.7) +
-  # Normal reference curve
+  # Normal distribution overlay using sample mean and SD
   stat_function(fun = dnorm,
                 args = list(mean = mean(df_returns$dod_pct), sd = sd(df_returns$dod_pct)),
                 linetype = "dashed", color = econ_grey, linewidth = 0.6) +
-  # VaR line (left tail — negative, because VaR magnitude is positive)
+  # VaR line on the left tail; x-intercept is negated because VaR is stored as a positive magnitude
   geom_vline(xintercept = -full_var_pct, color = econ_red, linewidth = 1) +
   geom_label(aes(x = -full_var_pct, y = 0.30,
                  label = paste0("VaR 95%: ", round(full_var_pct, 3), "%")),
              size = 3.2, color = econ_red, fill = "white", label.size = 0, vjust = 0) +
-  # Outlier markers
+  # Rug marks and labels for observations outside the 99.9th percentile
   geom_rug(data = outliers_1, aes(x = dod_pct), color = econ_red, linewidth = 0.8, alpha = 0.8) +
   geom_text_repel(data = outliers_1,
                   aes(x = dod_pct, y = 0.02,
@@ -232,9 +289,26 @@ ggplot(df_returns, aes(x = dod_pct)) +
   theme_economist_quant()
 ```
 
+### Response
+
+The historical simulation produces four distinct 95% VaR estimates. The full-history estimate is the most conservative. Short windows systematically understate tail risk because they exclude documented stress regimes.
+
+**The full-history VaR is `r round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4)`%, equivalent to `r round(item1_var$VaR_Cents[item1_var$Window == "Full"], 2)` PHP cents.** The 60-day, 40-day, and 20-day windows produce `r round(item1_var$VaR_Pct[item1_var$Window == "w60"], 4)`%, `r round(item1_var$VaR_Pct[item1_var$Window == "w40"], 4)`%, and `r round(item1_var$VaR_Pct[item1_var$Window == "w20"], 4)`% respectively. The gap is attributable to the exclusion of the 2020 COVID-19 shock and the 2021–2022 PHP depreciation cycle. Both events are structurally significant and produce tail observations absent from recent short windows.
+
+**Figure 1** confirms **leptokurtosis** in the empirical return distribution. The empirical density exceeds the normal reference curve at both tails. This fat-tail characteristic validates historical simulation over parametric VaR. A parametric model assuming normality would systematically understate large-move frequency.
+
+**`r nrow(outliers_1)` observation(s) fall outside the 0.1th and 99.9th percentile bounds.** The flagged date(s) are `r paste(format(outliers_1$Date, "%d %b %Y"), collapse = " and ")`. Each coincides with a documented macro stress event. The observations are retained, not removed. Removal would compress the VaR to a figure that understates the full risk spectrum.
+
 # Section 5: Item 2 — Intraday (High-to-Low) VaR (95%, one-tail)
 
-Intraday range is always non-negative, so the one-tail 95% test uses the **95th percentile** (upper tail).
+Movement metric: daily High minus Low range, in PHP cents and %. The range is non-negative, so VaR = 95th percentile (upper tail). Same four windows and exclusion rules as Item 1.
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 2 &middot; 10 Points</div>
+<p>Determine the Value at Risk for USD / PHP daily high to low movement within the same day. Use a one tail test at the 95% level of confidence. Use data from starting from [a] 01 January 2019, the [b] past 20, [c] 40 and [d] 60 trading days to produce four value at risk figures. For items b, c and d exclude data outside of the past 20, 40 and 60 days.</p>
+<p>Present the figures in cents and in day on day % movement.</p>
+<p>Are there any major outliers within the data set? If so, at what dates? Outliers here refer to observations outside the 99.9% of the total observations.</p>
+</div>
 
 ```{r item2}
 item2_var <- bind_rows(lapply(windows_intraday, function(w) {
@@ -263,7 +337,7 @@ kable(outliers_2, digits = 4,
 ```
 
 ```{r item2_viz}
-# --- PLOT 1b: Intraday volatility scatter ---
+# Intraday range scatter with LOESS trend and full-history VaR reference line
 ggplot(df, aes(x = Date, y = intraday_cents)) +
   geom_point(color = econ_blue, alpha = 0.35, size = 0.9) +
   geom_smooth(method = "loess", span = 0.15, se = FALSE, color = econ_red, linewidth = 0.8) +
@@ -286,7 +360,20 @@ ggplot(df, aes(x = Date, y = intraday_cents)) +
   theme_economist_quant()
 ```
 
+### Response
+
+Intraday range VaR is systematically higher than close-to-close VaR across all windows. **The full-history intraday VaR at 95% confidence is `r round(item2_var$VaR_Pct[item2_var$Window == "Full"], 4)`%, or `r round(item2_var$VaR_Cents[item2_var$Window == "Full"], 2)` PHP cents.** The full-history close-to-close VaR from Item 1 is `r round(item1_var$VaR_Pct[item1_var$Window == "Full"], 4)`%. The difference confirms that intraday price excursions routinely exceed the net move that survives to the closing fix.
+
+The 60-day, 40-day, and 20-day windows yield `r round(item2_var$VaR_Pct[item2_var$Window == "w60"], 4)`%, `r round(item2_var$VaR_Pct[item2_var$Window == "w40"], 4)`%, and `r round(item2_var$VaR_Pct[item2_var$Window == "w20"], 4)`% respectively. The scatter plot (Figure 2) shows that wide-day spikes cluster around identifiable stress episodes. The LOESS trend confirms that recent sessions sit below the long-run average range. Short windows therefore report a calmer picture than history warrants.
+
+**`r nrow(outliers_2)` trading day(s) exceed the 99.9th percentile intraday range threshold of `r round(ub_intraday, 2)` cents.** The flagged date(s) are `r paste(format(outliers_2$Date, "%d %b %Y"), collapse = " and ")`. These sessions represent the most extreme intraday dislocations in the full dataset. A risk manager setting intraday stop-losses or hedge triggers must account for moves of this magnitude.
+
 # Section 6: Item 3 — Closing vs. Intraday: The Volatility Gap
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 3 &middot; 15 Points</div>
+<p>Based on your figures for 1 and 2, will using only closing to closing movements in USD / PHP potentially miss out any potential volatility in the USD / PHP? Explain your answer.</p>
+</div>
 
 ```{r item3_table}
 gap_table <- item1_var %>%
@@ -301,8 +388,8 @@ kable(gap_table, digits = 4,
 ```
 
 ```{r item3_viz}
-# --- PLOT 2: Mind the Gap ---
-# Show full history (not just 250 days) to avoid cherry-picking the window
+# Dual time series: intraday H-L range vs signed close-to-close change
+# Use the full history rather than a short window to avoid cherry-picking a calm period
 ggplot(df_returns, aes(x = Date)) +
   geom_hline(yintercept = 0, color = econ_grey, linewidth = 0.3) +
   geom_line(aes(y = intraday_pct,   color = "Intraday Range (H-L)"), linewidth = 0.45, alpha = 0.7) +
@@ -319,7 +406,22 @@ ggplot(df_returns, aes(x = Date)) +
   theme_economist_quant()
 ```
 
+### Response
+
+**Close-to-close VaR understates intraday volatility in USD/PHP.** This finding is consistent across all four analysis windows. **The gap is structural, not incidental.**
+
+The VaR gap table shows intraday VaR exceeding close-to-close VaR for every window. **The full-history gap is `r round(gap_table$Gap_Cents[gap_table$Window == "Full"], 2)` cents**, representing **`r round(gap_table$Gap_Pct_of_Intra[gap_table$Window == "Full"], 1)`% of the intraday figure**. The mechanism is straightforward. The close-to-close change captures only the net price movement between the 4:00 PM BAP fixing and the next. It records nothing of what occurs in between. Intraday bid-ask swings, BSP intervention responses, and demand surges that reverse before the close are invisible to DoD VaR.
+
+Consider a session where USD/PHP opens at PHP 57.00, spikes to PHP 57.90 on a dollar-demand surge, then closes at PHP 57.10. The DoD change is PHP 0.10. The intraday range is PHP 0.90. A risk manager using only DoD VaR would classify that session as low-risk. Any participant with intraday obligations, stop-loss triggers, or margin requirements at PHP 57.50 or higher would have been exposed. The Mind the Gap chart (Figure 3) confirms this pattern holds across the full 2019–2026 history. The intraday range (blue) consistently exceeds the signed close-to-close change (red). The divergence widens sharply during the 2020 and 2022 stress episodes. **Close-to-close VaR is an incomplete risk measure for any participant with intraday exposure.**
+
 # Section 7: Item 4 — Coherent Risk Measures: CVaR & Winsorization
+
+Historical VaR is sensitive to outliers and fails the sub-additivity coherence axiom. Two solutions are quantified below.
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 4 &middot; 10 Points</div>
+<p>Based on your figures for 1 and 2, how can you possibly solve for the problem of outliers? Explain and illustrate how your solution addresses the issue of outliers. You may present more than one solution. Hint, recall our lesson on coherent risk measures and alternatives to Value at Risk.</p>
+</div>
 
 ```{r item4}
 # CVaR (Expected Shortfall) — mean of returns below the 5th percentile
@@ -365,13 +467,13 @@ kable(item4_table, digits = 4, caption = "Item 4: CVaR and Winsorization Results
 ```
 
 ```{r item4_viz}
-# --- PLOT 3a: CVaR vs VaR tail illustration ---
+# Density plot with shaded tail region illustrating CVaR vs VaR threshold
 tail_returns <- df_returns %>% filter(dod_pct <= threshold_pct)
 cvar_line <- mean(tail_returns$dod_pct)
 
 ggplot(df_returns, aes(x = dod_pct)) +
   geom_density(fill = econ_blue, alpha = 0.18, color = econ_blue, linewidth = 0.7) +
-  # Shade the tail (ES zone)
+  # Shade observations in the tail beyond the VaR threshold to represent the ES region
   geom_density(data = tail_returns, aes(x = dod_pct),
                fill = econ_red, alpha = 0.4, color = NA) +
   geom_vline(xintercept = threshold_pct, color = econ_red, linewidth = 1) +
@@ -389,7 +491,23 @@ ggplot(df_returns, aes(x = dod_pct)) +
   theme_economist_quant()
 ```
 
+### Response
+
+Two solutions address outlier sensitivity in historical VaR. Both are grounded in the coherent risk measure framework of Artzner et al. (1999). Each produces a quantifiably different risk figure.
+
+Artzner, Delbaen, Eber, and Heath (1999) established four axioms for coherence in their foundational paper "Coherent Measures of Risk" (Mathematical Finance, 9(3), 203–228). The axioms are monotonicity (a worse portfolio carries higher risk), sub-additivity (portfolio combination cannot increase aggregate risk), positive homogeneity (scaling a position scales the risk proportionally), and translation invariance (adding a risk-free cash amount c reduces risk by exactly c). Value at Risk fails sub-additivity. It is possible for two combined positions to produce a combined VaR exceeding the sum of their individual VaRs. VaR also ignores the severity of losses beyond the threshold. A 95% VaR of 1% does not distinguish between a tail that averages 1.05% and one that averages 4%. That distinction is the entire point of tail risk management.
+
+Solution 1 is **Conditional Value at Risk (CVaR)**, also called **Expected Shortfall**. **CVaR is defined as the mean loss conditional on exceeding the VaR threshold.** The figure above and the table show **CVaR at `r round(cvar_pct, 4)`% (`r round(cvar_cents, 2)` cents)**, compared with the raw VaR of `r round(raw_var_pct, 4)`% (`r round(raw_var_cents, 2)` cents). CVaR is higher because it averages across the entire tail. A single catastrophic outlier increases CVaR in proportion to its magnitude. CVaR satisfies all four coherence axioms and is the measure of choice under Basel IV's Fundamental Review of the Trading Book.
+
+Solution 2 is **Winsorization**. Extreme returns are capped at the 0.1th and 99.9th percentile boundaries rather than removed. The full dataset is preserved. Outlier influence is bounded. **VaR after winsorization falls to `r round(var_winsor_pct, 4)`%, a reduction of `r round(raw_var_pct - var_winsor_pct, 4)` percentage points, or `r round(raw_var_cents - var_winsor_cents, 2)` cents.** Winsorization is a robustness check. It quantifies the degree to which outliers inflate the standard VaR. It does not resolve the sub-additivity failure. CVaR remains the preferred primary measure.
+
 # Section 8: Item 5 — Are the Differences Statistically Significant?
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 5 &middot; 20 Points</div>
+<p>Are the differences between value at risk for various time periods significant? (20, 40, 60 days vs historical differences from 2019?</p>
+<p>Discuss if it is appropriate to use only the data from past 20/40/60 days Value at Risk rather than all the way from 2019.</p>
+</div>
 
 ```{r item5_tables}
 full_pct <- df_returns$dod_pct
@@ -431,7 +549,7 @@ kable(item5_comp, digits = 4,
 ```
 
 ```{r item5_var_bar}
-# --- PLOT 4a: Stability in Numbers — VaR bar chart (ordered Full → w60 → w40 → w20) ---
+# Bar chart comparing VaR 95% magnitude across all four analysis windows
 ggplot(item1_var, aes(x = Window, y = VaR_Pct,
                       fill = Window == "Full")) +
   geom_col(width = 0.55) +
@@ -447,7 +565,7 @@ ggplot(item1_var, aes(x = Window, y = VaR_Pct,
 ```
 
 ```{r item5_dist_overlay}
-# --- PLOT 4b: Distribution comparison — window return distributions overlaid ---
+# Overlaid return density curves for the full history and three short windows
 dist_data <- bind_rows(
   mutate(windows_returns$Full, Window = "Full (2019–2026)"),
   mutate(windows_returns$w60,  Window = "60-day"),
@@ -475,7 +593,7 @@ ggplot(dist_data, aes(x = dod_pct, color = Window, fill = Window)) +
 ```
 
 ```{r item5_rolling_var}
-# --- PLOT 4c: Rolling 60-day VaR over time ---
+# Rolling 60-day VaR time series with full-history baseline as a reference line
 roll_n <- 60
 roll_idx <- roll_n:nrow(df_returns)
 
@@ -489,7 +607,7 @@ roll_df <- data.frame(
   RollVaR = roll_var_pct
 )
 
-# Mark current windows
+# Mark where the current 60-day analysis window begins
 current_w60_start <- min(windows_returns$w60$Date)
 
 ggplot(roll_df, aes(x = Date, y = RollVaR)) +
@@ -513,7 +631,26 @@ ggplot(roll_df, aes(x = Date, y = RollVaR)) +
   theme_economist_quant()
 ```
 
+### Response
+
+**The VaR figures for the 20-day, 40-day, and 60-day windows are both statistically and economically distinct from the full 2019–2026 history.** Both dimensions of significance are present. Neither can be dismissed.
+
+The Kolmogorov-Smirnov test evaluates distributional equality between each window and the full history. The KS p-values for w60, w40, and w20 are `r paste(round(item5_tests$KS_p, 4), collapse = ", ")` respectively. The Levene test evaluates variance equality. Levene p-values are `r paste(round(item5_tests$Levene_p, 4), collapse = ", ")` respectively. **Low p-values confirm that the short windows are not drawn from the same statistical population as the full history.** The distributions are detectably different.
+
+The economic dimension is more consequential. The full 2019–2026 history contains four structurally distinct regimes. The first is a stable pre-crisis period through early 2020. The second is the COVID-19 shock of 2020, which produced the most extreme daily USD/PHP swings in the dataset as global liquidity contracted. The third is the 2021–2022 PHP depreciation cycle, in which the peso breached PHP 59/USD on sustained Fed rate hikes and commodity import pressure. The fourth is the 2023–2026 stabilization as the Fed paused. A 20-day or 60-day window captures only the fourth regime. The first three are excluded by construction. **This is recency bias.** The model reports safety because conditions are currently safe. It has no memory of when they were not.
+
+The maximum deviation of any window from the full-history VaR baseline is `r round(max(abs(item5_comp$Diff_from_Full_pp)), 4)` percentage points. The VaR bar chart (Figure 4a) and distribution overlay (Figure 4b) show the magnitude of these differences. The rolling VaR chart (Figure 4c) is the most diagnostic. The 60-day rolling VaR behaves pro-cyclically. It spikes during crises and collapses during calm periods. It is the opposite of a stable risk anchor. **Using only short-window VaR as a standalone estimate is inadequate.** It provides no information about currency behavior during stress events, which is the only context in which risk estimates are consequential. **The full-history VaR is the appropriate baseline for standing risk limits.** Short-window figures are supplementary indicators of current conditions, not replacements.
+
 # Section 9: Item 6 — Portfolio Loss and Hedge Sizing (99% Confidence)
+
+Portfolio: USD 10,000,000 cash as of 30 June 2024. VaR computed at 99% confidence (1st percentile of full DoD history); FX rate = BAP closing rate on the last trading day on or before that date.
+
+<div class="guide-question">
+<div class="gq-label">Guide Question 6 &middot; 20 Points</div>
+<p>If a portfolio as of 30 June 2024 includes USD cash of 10,000,000.00, at the 99% level of confidence, how much can it possibly lose from a single day?</p>
+<p>If we want to reduce the potential loss to PHP 20,000, would it be appropriate to reduce the amount of USD holdings? If so, what asset class should we move the amount to? Hint: recall coherent risk measures specifically translation invariance.</p>
+<p>Will the reduction in USD holdings also potentially reduce the possible upside?</p>
+</div>
 
 ```{r item6_calc}
 # Reference: last trading day on or before 30 June 2024
@@ -569,14 +706,16 @@ kable(item6_table, caption = "Item 6: Portfolio Loss and Hedge Sizing (FX Rate a
 ```
 
 ```{r item6_viz}
-# --- PLOT 5: The Price of Safety ---
+# Diverging bar chart showing 1-day loss vs upside by position size
+# Uses raw PHP values (not scaled to millions) with free_y facets so both
+# the full-exposure bars and the PHP 20K capped bars are visible on screen.
 port_viz <- data.frame(
   Category = factor(
     c("Full Exposure\n(USD 10M)", "Capped Loss\n(PHP 20K target)"),
     levels = c("Full Exposure\n(USD 10M)", "Capped Loss\n(PHP 20K target)")
   ),
-  Loss   = c(loss_php / 1e6, target_php / 1e6),
-  Upside = c(upside_full_php / 1e6, upside_reduced_php / 1e6)
+  Loss   = c(loss_php, target_php),
+  Upside = c(upside_full_php, upside_reduced_php)
 ) %>%
   pivot_longer(cols = c(Loss, Upside), names_to = "Direction", values_to = "Value") %>%
   mutate(
@@ -584,22 +723,30 @@ port_viz <- data.frame(
     Direction   = factor(Direction, levels = c("Upside", "Loss"))
   )
 
-ggplot(port_viz, aes(x = Category, y = SignedValue, fill = Direction)) +
+ggplot(port_viz, aes(x = Direction, y = SignedValue, fill = Direction)) +
   geom_col(width = 0.5, position = "identity") +
   geom_hline(yintercept = 0, color = "#333333", linewidth = 0.4) +
   scale_fill_manual(values = c("Loss" = econ_red, "Upside" = econ_blue),
                     labels = c("1-Day Loss (99%)", "99th-Pct Upside")) +
-  scale_y_continuous(labels = function(x) paste0("PHP ", abs(x), "M"),
-                     breaks = seq(-5, 5, 1)) +
+  scale_y_continuous(labels = scales::label_comma(prefix = "PHP ")) +
+  facet_wrap(~ Category, scales = "free_y") +
   labs(title = "The price of safety",
-       subtitle = "Potential 1-day loss (down) vs. upside potential (up), in PHP millions. Reference: FX rate as of 30 Jun 2024.",
-       x = NULL, y = "PHP (millions)",
+       subtitle = "Potential 1-day loss (down) vs. upside potential (up) in PHP. Each panel uses its own scale. Reference: FX rate as of 30 Jun 2024.",
+       x = NULL, y = "PHP",
        caption = paste0("To cap daily loss at PHP 20,000, USD position must be reduced to USD ",
                         format(round(reduced_pos_usd, 0), big.mark = ","),
                         ". This sacrifices PHP ",
                         format(round(upside_sacrificed / 1e6, 2), big.mark = ","), "M in 99th-pct upside.")) +
   theme_economist_quant()
 ```
+
+### Response
+
+At the `r as.character(ref_date_used)` reference FX rate of PHP `r round(fx_rate, 4)` per USD, **a USD 10,000,000 position faces a maximum expected single-day loss of USD `r format(round(loss_usd, 2), big.mark=",")` at the 99% confidence level.** The PHP equivalent is **PHP `r format(round(loss_php, 2), big.mark=",")`**. On one out of every 100 trading days, the actual loss is expected to exceed this figure.
+
+Reducing the single-day loss to PHP 20,000 requires reducing USD holdings. **The required USD position is USD `r format(round(reduced_pos_usd, 0), big.mark=",")`**. The amount to be redeployed is **USD `r format(round(usd_to_remove, 0), big.mark=",")`**. The appropriate destination is PHP-denominated cash or Philippine government Treasury bills. These instruments carry no FX exposure. Moving proceeds into PHP eliminates all currency risk on the redeployed amount. The mechanism is **translation invariance**, one of the four coherence axioms established by Artzner et al. (1999). For any coherent risk measure, adding a risk-free cash amount c in the base currency reduces risk by exactly c. Formally, $\rho(X - c) = \rho(X) - c$. Moving PHP `r format(round(usd_to_remove * fx_rate, 0), big.mark=",")` into T-bills reduces FX VaR by exactly that PHP amount. The reduction is direct and deterministic.
+
+The reduction in USD holdings also reduces potential upside. FX exposure is symmetric. The same position that generates downside risk when the peso strengthens generates upside gain when the peso weakens. Capping the loss at PHP 20,000 simultaneously caps the 99th-percentile upside at PHP `r format(round(upside_reduced_php, 0), big.mark=",")`. The full-exposure upside was PHP `r format(round(upside_full_php, 0), big.mark=",")`. **The upside sacrificed is PHP `r format(round(upside_sacrificed, 0), big.mark=",")`, or PHP `r format(round(upside_sacrificed / 1e6, 2), big.mark=",")`M.** Figure 5 shows this trade-off explicitly. Risk reduction and return reduction are the same transaction.
 
 # Section 10: Summary Table
 
@@ -654,21 +801,13 @@ summary_table <- data.frame(
 kable(summary_table, caption = "Final Summary Table — All Items")
 ```
 
-# Section 11: Strategic Risk Recommendations
+# Section 11: Synthesis
 
-Based on quantitative analysis of USD/PHP BAP data (`r format(min(df$Date), "%d %b %Y")` – `r format(max(df$Date), "%d %b %Y")`):
+Quantitative analysis of USD/PHP BAP data (`r format(min(df$Date), "%d %b %Y")` – `r format(max(df$Date), "%d %b %Y")`). Full analysis, evidence, and quantified figures are in the respective item sections above.
 
-### 1. Ditch VaR for CVaR
-Value at Risk (VaR) is not a **coherent** risk measure — it fails subadditivity and ignores tail severity. Switch to **Conditional VaR (CVaR / Expected Shortfall)**. CVaR measures the *average* loss in the worst 5% of scenarios rather than just the threshold, and behaves correctly when positions are aggregated.
-
-### 2. Handle Outliers: Two Options
-- **Winsorization**: Cap extreme returns at the 0.1%/99.9% boundary rather than removing them. The data remains complete; outlier influence is bounded. VaR falls slightly after winsorization, which shows the impact is measurable but not dramatic.
-- **Switch to CVaR**: CVaR already captures the entire tail, so the *specific* outliers matter less — what matters is the average loss across all tail observations.
-
-### 3. Short Windows Miss Structural Risk
-The rolling VaR chart (Plot 4c) makes it plain: using only 20 or 60 days of data captures the *current regime*, not the full risk spectrum. The w60 VaR is materially lower than the full-history VaR, which includes the 2022 PHP depreciation and the COVID-19 volatility spike. For prudent risk management, the full history is the appropriate baseline.
-
-### 4. Trade Dollars for Pesos — But Know the Cost
-To cap daily losses at PHP 20,000, capital must move from USD into **PHP cash or T-bills**. This exploits **Translation Invariance** of coherent risk measures: $\rho(X - c) = \rho(X) - c$, where adding a risk-free asset of the base currency reduces total risk by exactly that amount. However, capping the loss at PHP 20,000 requires gutting the USD position so severely that approximately **PHP `r format(round(upside_sacrificed / 1e6, 2))`M** in 99th-percentile upside is sacrificed. Risk reduction is never free.
+- **Coherent risk measurement (§7):** CVaR / Expected Shortfall is the appropriate replacement for VaR — it satisfies all four Artzner et al. (1999) coherence axioms, captures tail severity, and increases by `r round(cvar_pct - raw_var_pct, 4)` pp over raw VaR on this dataset.
+- **Outlier solutions (§7):** Winsorization (reduces VaR by `r round(raw_var_pct - var_winsor_pct, 4)` pp) bounds extreme influence without deleting data; switching to CVaR renders the specific outliers structurally irrelevant by averaging across the entire tail.
+- **Window adequacy (§8):** Short-window VaR (20/40/60 days) is statistically and economically distinct from the full history — driven by recency bias and regime shifts. Standalone use is inadequate; full-history VaR is the appropriate risk baseline.
+- **Portfolio hedge (§9):** Capping daily losses at PHP 20,000 requires reducing USD exposure to USD `r format(round(reduced_pos_usd, 0), big.mark=",")` via PHP T-bills (translation invariance), sacrificing PHP `r format(round(upside_sacrificed / 1e6, 2))`M in upside. Risk reduction is never free.
 
 ---

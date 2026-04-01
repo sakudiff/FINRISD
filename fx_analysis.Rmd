@@ -11,6 +11,7 @@ output:
 **Professor: Bismark**  
 **Term, AY: 2nd term AY 2025-2026**
 
+**Github Code Repository Link:** **https://github.com/sakudiff/FINRISD.git** 
 ---
 
 **Group 2 Members**

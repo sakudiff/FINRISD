@@ -269,9 +269,123 @@
 
 Place all detailed tables, outlier listings, and additional figures here:
 
-- **Appendix A:** Full Item 1 VaR table + 4 outlier dates (11 Nov 2022; 27 Dec 2022; 06 Feb 2023; 02 Jan 2025)
-- **Appendix B:** Full Item 2 intraday VaR table + 2 outlier dates (04 Sep 2019; 12 Sep 2024)
-- **Appendix C:** Descriptive statistics by window (Full: n=1735, Mean=0.0060, SD=0.3361, Skew=0.0457, Kurt=2.1106; w60: n=60, Mean=−0.0332, SD=0.2878, Skew=−0.4345, Kurt=0.9081; w40: n=40, Mean=−0.0479, SD=0.2894, Skew=−0.8464, Kurt=0.9938; w20: n=20, Mean=−0.1092, SD=0.3148, Skew=−0.9053, Kurt=0.6524)
-- **Appendix D:** Winsorization bounds [−1.5182%, 1.2951%] — VaR reduction = 0.0000 pp; CVaR = 0.7301% (40.68 cents)
-- **Appendix E:** Complete portfolio calculation (FX = 58.61 as of 28 Jun 2024, VaR 99% = 0.7974% / 44.76 cents, upside 99% = 0.9155%)
-- **Appendix F:** Full summary table from Rmd §10
+### Appendix A — Item 1: Close-to-Close VaR (95%, One-Tail)
+
+**Table A1: VaR by Window**
+
+| Window | n | VaR (%) | VaR (cents) |
+|--------|---|---------|-------------|
+| Full (2019–) | 1,735 | 0.5248 | 28.62 |
+| 60-day | 60 | 0.4782 | 28.20 |
+| 40-day | 40 | 0.4803 | 28.33 |
+| 20-day | 20 | 0.5005 | 29.48 |
+
+**Table A2: Outliers — DoD % outside [−1.5182%, +1.2951%] (0.1%/99.9% bounds)**
+
+| Date | Close | DoD (%) | DoD (cents) |
+|------|-------|---------|-------------|
+| 11 Nov 2022 | 57.23 | −1.6498 | −96 |
+| 27 Dec 2022 | 55.90 | +1.3599 | +75 |
+| 06 Feb 2023 | 54.39 | +1.3227 | +71 |
+| 02 Jan 2025 | 57.91 | −1.8308 | −108 |
+
+---
+
+### Appendix B — Item 2: Intraday (High–Low) VaR (95%, One-Tail)
+
+**Table B1: VaR by Window**
+
+| Window | n | VaR (cents) | VaR (%) |
+|--------|---|-------------|---------|
+| Full (2019–) | 1,736 | 40.00 | 0.7302 |
+| 60-day | 60 | 29.40 | 0.4991 |
+| 40-day | 40 | 29.40 | 0.4991 |
+| 20-day | 20 | 37.50 | 0.6528 |
+
+**Table B2: Outliers — Intraday range above 100.63 cents (99.9th percentile)**
+
+| Date | High | Low | Intraday (cents) | Intraday (%) |
+|------|------|-----|-------------------|--------------|
+| 04 Sep 2019 | 52.93 | 51.92 | 101 | 1.9453 |
+| 12 Sep 2024 | 56.20 | 55.08 | 112 | 2.0334 |
+
+---
+
+### Appendix C — Item 3: VaR Gap (Intraday − DoD)
+
+**Table C1: Gap by Window**
+
+| Window | DoD VaR (cents) | Intraday VaR (cents) | Gap (cents) | Gap % of Intra |
+|--------|-----------------|-----------------------|-------------|----------------|
+| Full | 28.62 | 40.00 | 11.38 | 28.45% |
+| 60-day | 28.20 | 29.40 | 1.20 | 4.08% |
+| 40-day | 28.33 | 29.40 | 1.08 | 3.66% |
+| 20-day | 29.48 | 37.50 | 8.02 | 21.39% |
+
+---
+
+### Appendix D — Item 4: CVaR & Winsorization (Full History)
+
+**Table D1: Coherent Risk Measures**
+
+| Metric | % | Cents |
+|--------|---|-------|
+| Raw VaR (95%) | 0.5248 | 28.62 |
+| CVaR / Expected Shortfall (95%) | 0.7301 | 40.68 |
+| Winsorization Lower Bound (0.1%) | −1.5182 | — |
+| Winsorization Upper Bound (99.9%) | +1.2951 | — |
+| VaR after Winsorization (95%) | 0.5248 | 28.62 |
+| VaR Reduction from Winsorization | 0.0000 pp | 0.00 |
+
+---
+
+### Appendix E — Item 5: Statistical Significance
+
+**Table E1: KS & Levene Tests (each window vs. full history)**
+
+| Window | n | KS Stat | KS p-value | Levene F | Levene p-value |
+|--------|---|---------|------------|----------|----------------|
+| 60-day | 60 | 0.0971 | 0.6453 | 0.7324 | 0.4640 |
+| 40-day | 40 | 0.1099 | 0.7327 | 0.5694 | 0.5691 |
+| 20-day | 20 | 0.2066 | 0.3673 | 0.0647 | 0.9484 |
+
+**Table E2: Descriptive Statistics by Window**
+
+| Window | n | Mean | SD | Skew | Kurtosis |
+|--------|---|------|----|------|----------|
+| Full | 1,735 | 0.0060 | 0.3361 | 0.0457 | 2.1106 |
+| 60-day | 60 | −0.0332 | 0.2878 | −0.4345 | 0.9081 |
+| 40-day | 40 | −0.0479 | 0.2894 | −0.8464 | 0.9938 |
+| 20-day | 20 | −0.1092 | 0.3148 | −0.9053 | 0.6524 |
+
+**Table E3: VaR Comparison — Difference from Full-History Baseline**
+
+| Window | n | VaR (%) | VaR (cents) | Diff from Full (pp) |
+|--------|---|---------|-------------|---------------------|
+| Full | 1,735 | 0.5248 | 28.62 | 0.0000 |
+| 60-day | 60 | 0.4782 | 28.20 | −0.0466 |
+| 40-day | 40 | 0.4803 | 28.33 | −0.0445 |
+| 20-day | 20 | 0.5005 | 29.48 | −0.0243 |
+
+---
+
+### Appendix F — Item 6: Portfolio Loss & Hedge Sizing (99% Confidence)
+
+**Table F1: Complete Calculation**
+
+| Parameter | Value |
+|-----------|-------|
+| Reference Date | 28 Jun 2024 |
+| FX Rate (PHP/USD) | 58.61 |
+| Full-History VaR 99% (%) | 0.7974 |
+| VaR 99% (cents) | 44.764 |
+| USD Position | 10,000,000 |
+| 1-Day Loss @ 99% (USD) | 79,739.69 |
+| 1-Day Loss @ 99% (PHP) | 4,673,543 |
+| Target Max 1-Day Loss (PHP) | 20,000 |
+| Required USD Position | 42,794.08 |
+| USD to Redeploy | 9,957,206 |
+| 99th Percentile Upside (%) | 0.9155 |
+| Upside on Full Position (PHP) | 5,365,528 |
+| Upside on Reduced Position (PHP) | 22,961.29 |
+| Upside Sacrificed (PHP) | 5,342,567 |

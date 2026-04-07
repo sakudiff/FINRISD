@@ -31,3 +31,6 @@ ENV/
 .idea/
 *.swp
 *.swo
+
+RMD_AGENT_BLUEPRINT.md
+fx-analysis-explanation.md

@@ -271,6 +271,9 @@ Place all detailed tables, outlier listings, and additional figures here:
 
 ### Appendix A — Item 1: Close-to-Close VaR (95%, One-Tail)
 
+**Figure A1:** *"The long tail of risk"* (`item1_viz`) — return density vs. Normal with VaR line + outlier rug  
+**Figure A2:** *"Seven years of USD/PHP"* (`price_history_viz`) — full price history with shaded analysis windows  
+
 **Table A1: VaR by Window**
 
 | Window | n | VaR (%) | VaR (cents) |
@@ -293,6 +296,8 @@ Place all detailed tables, outlier listings, and additional figures here:
 
 ### Appendix B — Item 2: Intraday (High–Low) VaR (95%, One-Tail)
 
+**Figure B1:** *"Wide days — intraday volatility over time"* (`item2_viz`) — intraday range scatter + LOESS trend + VaR reference line  
+
 **Table B1: VaR by Window**
 
 | Window | n | VaR (cents) | VaR (%) |
@@ -313,6 +318,8 @@ Place all detailed tables, outlier listings, and additional figures here:
 
 ### Appendix C — Item 3: VaR Gap (Intraday − DoD)
 
+**Figure C1:** *"Mind the gap"* (`item3_viz`) — dual time series: intraday range vs. close-to-close change  
+
 **Table C1: Gap by Window**
 
 | Window | DoD VaR (cents) | Intraday VaR (cents) | Gap (cents) | Gap % of Intra |
@@ -325,6 +332,8 @@ Place all detailed tables, outlier listings, and additional figures here:
 ---
 
 ### Appendix D — Item 4: CVaR & Winsorization (Full History)
+
+**Figure D1:** *"Beyond the threshold: Expected Shortfall"* (`item4_viz`) — CVaR vs. VaR threshold density plot  
 
 **Table D1: Coherent Risk Measures**
 
@@ -340,6 +349,10 @@ Place all detailed tables, outlier listings, and additional figures here:
 ---
 
 ### Appendix E — Item 5: Statistical Significance
+
+**Figure E1:** *"Stability in numbers"* (`item5_var_bar`) — VaR bar chart across windows  
+**Figure E2:** *"Same currency, different stories"* (`item5_dist_overlay`) — overlaid return density curves  
+**Figure E3:** *"VaR is not static"* (`item5_rolling_var`) — rolling 60-day VaR chart showing pro-cyclical behavior  
 
 **Table E1: KS & Levene Tests (each window vs. full history)**
 
@@ -370,6 +383,8 @@ Place all detailed tables, outlier listings, and additional figures here:
 ---
 
 ### Appendix F — Item 6: Portfolio Loss & Hedge Sizing (99% Confidence)
+
+**Figure F1:** *"The price of safety"* (`item6_viz`) — diverging bar chart: loss vs. upside, two panels (full exposure vs. capped loss)  
 
 **Table F1: Complete Calculation**
 

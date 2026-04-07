@@ -57,7 +57,7 @@ output:
 </style>
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6, dev = "png", fig.path = "figures/")
 library(readr)
 library(dplyr)
 library(lubridate)
@@ -800,6 +800,42 @@ summary_table <- data.frame(
   )
 )
 kable(summary_table, caption = "Final Summary Table — All Items")
+```
+
+# Section 10b: Export Tables as LaTeX
+
+```{r export_latex_tables, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+dir.create("tables", showWarnings = FALSE)
+
+export_tex <- function(obj, filename, caption = NULL) {
+  tbl <- knitr::kable(obj, format = "latex", booktabs = TRUE, digits = 4, caption = caption, escape = TRUE)
+  writeLines(tbl, file.path("tables", filename))
+}
+
+# Item 1
+export_tex(item1_var, "item1_var.tex", caption = "Item 1: Close-to-Close VaR at 95% Confidence (Loss Magnitude)")
+export_tex(outliers_1, "item1_outliers.tex", caption = "Item 1: Outliers — DoD % outside 0.1%/99.9% bounds")
+
+# Item 2
+export_tex(item2_var, "item2_var.tex", caption = "Item 2: Intraday (High–Low) VaR at 95% Confidence")
+export_tex(outliers_2, "item2_outliers.tex", caption = "Item 2: Outliers — Intraday range above 99.9th percentile")
+
+# Item 3
+export_tex(gap_table, "item3_gap.tex", caption = "Item 3: VaR Gap (Intraday − DoD)")
+
+# Item 4
+export_tex(item4_table, "item4_cvar.tex", caption = "Item 4: CVaR and Winsorization Results (Full History)")
+
+# Item 5
+export_tex(item5_tests, "item5_tests.tex", caption = "Item 5: Significance Tests (KS and Levene)")
+export_tex(item5_desc, "item5_desc.tex", caption = "Item 5: Descriptive Statistics by Window")
+export_tex(item5_comp, "item5_comp.tex", caption = "Item 5: VaR Comparison — Difference from Full-History Baseline")
+
+# Item 6
+export_tex(item6_table, "item6_portfolio.tex", caption = "Item 6: Portfolio Loss and Hedge Sizing (99% Confidence)")
+
+# Summary
+export_tex(summary_table, "summary_table.tex", caption = "Final Summary Table — All Items")
 ```
 
 # Section 11: Synthesis

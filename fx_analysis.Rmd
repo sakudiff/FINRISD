@@ -847,4 +847,8 @@ Quantitative analysis of USD/PHP BAP data (`r format(min(df$Date), "%d %b %Y")` 
 - **Window adequacy (§8):** Short-window VaR (20/40/60 days) is economically distinct from the full history (statistical tests fail to reject equality due to low power at small N) — driven by recency bias and regime shifts. Standalone use is inadequate; full-history VaR is the appropriate risk baseline.
 - **Portfolio hedge (§9):** Capping daily losses at PHP 20,000 requires reducing USD exposure to USD `r format(round(reduced_pos_usd, 0), big.mark=",")` via PHP T-bills (translation invariance), sacrificing PHP `r format(round(upside_sacrificed / 1e6, 2))`M in upside. Risk reduction is never free.
 
+# References
+
+Artzner, Philippe & Delbaen, Freddy & Jean-Marc, Eber & Heath, David. (1999). Coherent Measures of Risk. Mathematical Finance. 9. 203 - 228. 10.1111/1467-9965.00068.
+
 ---
